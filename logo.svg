@@ -1,0 +1,46 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="neuralGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12" result="coloredBlur" />
+      <feMerge>
+        <feMergeNode in="coloredBlur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g filter="url(#softGlow)">
+    <!-- Background Structure (The Ally/Foundation) -->
+    <path d="M256 130 L 360 190 L 360 322 L 256 382 L 152 322 L 152 190 Z" 
+          stroke="url(#neuralGradient)" stroke-width="8" fill="url(#neuralGradient)" fill-opacity="0.05" opacity="0.5" />
+
+    <!-- The Neural Weaver (Interconnected Flow) -->
+    <path d="M152 322 C 152 322, 152 150, 256 150 C 360 150, 360 322, 360 322" 
+          stroke="url(#neuralGradient)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+          
+    <path d="M152 190 C 152 190, 220 256, 256 256 C 292 256, 360 190, 360 190" 
+          stroke="url(#neuralGradient)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.8"/>
+
+    <!-- Central Node (The Convergence) -->
+    <circle cx="256" cy="256" r="28" fill="white" />
+    <circle cx="256" cy="256" r="20" fill="#8b5cf6" />
+
+    <!-- Satellite Nodes -->
+    <circle cx="152" cy="190" r="16" fill="#3b82f6" />
+    <circle cx="360" cy="190" r="16" fill="#ec4899" />
+    <circle cx="152" cy="322" r="12" fill="#3b82f6" opacity="0.6"/>
+    <circle cx="360" cy="322" r="12" fill="#ec4899" opacity="0.6"/>
+    
+    <!-- Floating Spark -->
+    <circle cx="256" cy="150" r="14" fill="white" opacity="0.8">
+       <animate attributeName="r" values="14;18;14" dur="3s" repeatCount="indefinite" />
+       <animate attributeName="opacity" values="0.8;1;0.8" dur="3s" repeatCount="indefinite" />
+    </circle>
+  </g>
+</svg>
