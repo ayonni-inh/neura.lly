@@ -39,6 +39,8 @@ export interface Message {
   sources?: GroundingSource[];
   generatedImageUrl?: string; // Deprecated in favor of generatedImageUrls
   generatedImageUrls?: string[];
+  generatedVideoUrl?: string;
+  generatedAudioUrl?: string;
   attachment?: Attachment;
   isBookmarked?: boolean;
   feedback?: 'positive' | 'negative';
@@ -66,5 +68,14 @@ export enum ProcessingState {
   STREAMING = 'streaming',
   IMAGEN = 'generating_image',
   EDITING_IMAGE = 'editing_image',
+  GENERATING_VIDEO = 'generating_video',
   ERROR = 'error'
+}
+
+export interface LogEntry {
+  id?: number;
+  timestamp: Date;
+  level: 'info' | 'warn' | 'error';
+  message: string;
+  details?: any;
 }

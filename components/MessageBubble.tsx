@@ -5,31 +5,47 @@ import { MarkdownRenderer } from '../utils/markdown';
 import { 
   User, ExternalLink, Bookmark, 
   Sparkles, X, Copy, Check, RotateCcw, Download,
-  FileText, Plus, Lightbulb, AlertTriangle
+  FileText, Plus, Lightbulb, AlertTriangle,
+  ThumbsUp, ThumbsDown, Volume2, Play, Pause
 } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
+  userAvatar?: string;
+  modelAvatar?: string;
   onToggleBookmark?: (id: string) => void;
-  onFeedback?: (id: string, type: 'positive' | 'negative' | null) => void;
+  onFeedback?: (id: string, type: 'positive' | 'negative' | undefined) => void;
   onActionClick?: (actionText: string) => void;
   onRerun?: (text: string, attachment?: Attachment) => void;
+  onRegenerate?: (id: string) => void;
   onContinue?: (id: string) => void;
   onSaveImage?: (url: string) => void;
+  onStop?: () => void;
+  onSpeech?: (text: string, id: string) => void;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ 
   message, 
+  userAvatar,
+  modelAvatar,
   onToggleBookmark, 
+  onFeedback,
   onActionClick,
   onRerun,
-  onSaveImage
+  onRegenerate,
+  onSaveImage,
+  onStop,
+  onSpeech
 }) => {
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isCaptured, setIsCaptured] = useState(false);
   const [savedImageUrls, setSavedImageUrls] = useState<Set<string>>(new Set());
-  
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [showActions, setShowActions] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const audioRef = React.useRef<HTMLAudioElement>(null);
+
   const isUser = message.role === Role.USER;
   const isError = message.isError;
   const hasStrategicFooter = !isUser && message.text.includes('**Insight:**');
@@ -58,6 +74,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
   }
 
+  const shouldTruncate = !isUser && !isExpanded && mainContent.length > 500;
+  const displayContent = shouldTruncate ? mainContent.slice(0, 500) + '...' : mainContent;
+
+  const handlePlayAudio = () => {
+    if (message.generatedAudioUrl) {
+      if (audioRef.current) {
+        if (isPlaying) {
+          audioRef.current.pause();
+        } else {
+          audioRef.current.play();
+        }
+        setIsPlaying(!isPlaying);
+      }
+    } else if (onSpeech) {
+      onSpeech(message.text, message.id);
+    }
+  };
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(message.text);
@@ -97,12 +130,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   return (
     <div id={`msg-${message.id}`} className={`flex gap-4 w-full group ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-4 duration-500`}>
       {!isUser && (
-        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-2 border shadow-lg ${isError ? 'bg-red-500/10 border-red-500/50 text-red-400' : 'glass-gloss border-mirror-border'}`}>
-          {isError ? <AlertTriangle className="w-4 h-4" /> : <Sparkles className="w-4 h-4 text-mirror-accent" />}
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-2 border shadow-lg overflow-hidden ${isError ? 'bg-red-500/10 border-red-500/50 text-red-400' : 'glass-gloss border-mirror-border'}`}>
+          {modelAvatar ? (
+            <img src={modelAvatar} alt="AI" className="w-full h-full object-cover" />
+          ) : (
+            isError ? <AlertTriangle className="w-4 h-4" /> : <Sparkles className="w-4 h-4 text-mirror-accent" />
+          )}
         </div>
       )}
 
-      <div className={`max-w-[85%] lg:max-w-[75%] flex flex-col gap-2 relative`}>
+      <div className={`max-w-[85%] lg:max-w-[75%] flex flex-col gap-2 relative`} onClick={() => setShowActions(!showActions)}>
         {/* Main Content Bubble */}
         <div className={`p-5 md:p-6 backdrop-blur-md shadow-xl transition-all duration-300 
           ${isUser 
@@ -111,13 +148,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               ? 'bg-red-500/5 border border-red-500/20 text-red-100 rounded-[24px] rounded-tl-md shadow-[0_0_30px_-10px_rgba(239,68,68,0.2)]'
               : 'glass-matte text-mirror-text rounded-[24px] rounded-tl-md'
           } 
-          ${message.isBookmarked ? 'ring-2 ring-yellow-500/30' : ''}`}
+          ${message.isBookmarked ? 'ring-2 ring-yellow-500/30' : ''}
+          cursor-pointer`}
         >
           
           {images.length > 0 && (
             <div className={`mb-4 grid gap-2 ${images.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
               {images.map((imgUrl, idx) => (
-                <div key={idx} className="relative rounded-2xl overflow-hidden shadow-2xl border border-white/10 group/img cursor-zoom-in" onClick={() => setZoomedImage(imgUrl)}>
+                <div key={idx} className="relative rounded-2xl overflow-hidden shadow-2xl border border-mirror-border group/img cursor-zoom-in" onClick={() => setZoomedImage(imgUrl)}>
                   <img src={imgUrl} alt={`Visual ${idx + 1}`} className="w-full h-auto object-cover transition-transform duration-700 group-hover/img:scale-105" />
                   
                   {/* Image-specific Quick Actions */}
@@ -148,6 +186,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             </div>
           )}
 
+          {message.generatedVideoUrl && (
+            <div className="mb-4 rounded-2xl overflow-hidden shadow-2xl border border-mirror-border">
+              <video 
+                src={message.generatedVideoUrl} 
+                controls 
+                className="w-full h-auto"
+                poster={message.attachment?.mimeType.startsWith('image/') ? `data:${message.attachment.mimeType};base64,${message.attachment.data}` : undefined}
+              />
+            </div>
+          )}
+
           {zoomedImage && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-2xl p-10 cursor-zoom-out" onClick={() => setZoomedImage(null)}>
                <div className="relative max-w-full max-h-full" onClick={(e) => e.stopPropagation()}>
@@ -174,11 +223,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {message.attachment && (
             <div className="mb-4">
               {message.attachment.mimeType.startsWith('image/') ? (
-                <div className="rounded-xl overflow-hidden shadow-lg border border-white/10 max-w-[200px]">
+                <div className="rounded-xl overflow-hidden shadow-lg border border-mirror-border max-w-[200px]">
                   <img src={`data:${message.attachment.mimeType};base64,${message.attachment.data}`} alt="Ref" className="w-full h-auto" />
                 </div>
               ) : (
-                <div className="flex items-center gap-2 p-2 bg-white/5 rounded-xl border border-white/10 text-xs text-mirror-subtext font-mono">
+                <div className="flex items-center gap-2 p-2 bg-mirror-text/5 rounded-xl border border-mirror-border text-xs text-mirror-subtext font-mono">
                   <FileText className="w-4 h-4 text-mirror-accent" />
                   {message.attachment.mimeType.split('/')[1].toUpperCase()}
                 </div>
@@ -187,13 +236,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           )}
           
           <div className="prose prose-invert max-w-none">
-             <MarkdownRenderer content={mainContent} isError={isError} />
+             <MarkdownRenderer content={displayContent} isError={isError} />
+             {!isUser && mainContent.length > 500 && (
+               <button 
+                 onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
+                 className="mt-2 text-xs font-bold text-mirror-accent hover:text-white transition-colors uppercase tracking-wider"
+               >
+                 {isExpanded ? 'Read Less' : 'Read More'}
+               </button>
+             )}
           </div>
 
           {message.sources && message.sources.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-white/5">
+            <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-mirror-border">
               {message.sources.map((s, i) => (
-                <a key={i} href={s.uri} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1 glass-gloss rounded-full text-[10px] text-mirror-subtext hover:text-white border border-mirror-border transition-all">
+                <a key={i} href={s.uri} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1 glass-gloss rounded-full text-[10px] text-mirror-subtext hover:text-mirror-text border border-mirror-border transition-all">
                   <ExternalLink className="w-3 h-3" /> <span className="truncate max-w-[120px]">{s.title}</span>
                 </a>
               ))}
@@ -202,7 +259,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         </div>
 
         {/* Unified Bottom Action Bar */}
-        <div className={`flex items-center gap-1 px-2 opacity-0 group-hover:opacity-100 transition-all duration-300 ${isUser ? 'justify-end' : 'justify-start'}`}>
+        <div className={`flex items-center gap-1 px-2 transition-all duration-300 ${isUser ? 'justify-end' : 'justify-start'} ${showActions ? 'opacity-100 translate-y-0 h-auto' : 'opacity-0 -translate-y-2 h-0 overflow-hidden'}`} onClick={(e) => e.stopPropagation()}>
+          {isUser && onStop && (
+            <button 
+              onClick={onStop} 
+              title="Stop Generation"
+              className="p-2 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-all hover:scale-110 active:scale-95"
+            >
+              <div className="w-3.5 h-3.5 bg-current rounded-sm" />
+            </button>
+          )}
+
           {isUser && onRerun && (
             <button 
               onClick={() => onRerun(message.text, message.attachment)} 
@@ -237,9 +304,60 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <button 
               onClick={() => handleDownloadImage(images[0], message.timestamp)} 
               title="Download All Visuals"
-              className="p-2 rounded-xl glass-gloss text-mirror-subtext hover:text-white transition-all hover:scale-110 active:scale-95"
+              className="p-2 rounded-xl glass-gloss text-mirror-subtext hover:text-mirror-text transition-all hover:scale-110 active:scale-95"
             >
               <Download className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {!isUser && onFeedback && (
+            <div className="flex items-center gap-1">
+              <button 
+                onClick={() => onFeedback(message.id, message.feedback === 'positive' ? undefined : 'positive')} 
+                title="Helpful"
+                className={`p-2 rounded-xl glass-gloss transition-all hover:scale-110 active:scale-95 ${message.feedback === 'positive' ? 'text-green-400 bg-green-500/10' : 'text-mirror-subtext hover:text-mirror-text'}`}
+              >
+                <ThumbsUp className={`w-3.5 h-3.5 ${message.feedback === 'positive' ? 'fill-current' : ''}`} />
+              </button>
+              <button 
+                onClick={() => onFeedback(message.id, message.feedback === 'negative' ? undefined : 'negative')} 
+                title="Not Helpful"
+                className={`p-2 rounded-xl glass-gloss transition-all hover:scale-110 active:scale-95 ${message.feedback === 'negative' ? 'text-red-400 bg-red-500/10' : 'text-mirror-subtext hover:text-mirror-text'}`}
+              >
+                <ThumbsDown className={`w-3.5 h-3.5 ${message.feedback === 'negative' ? 'fill-current' : ''}`} />
+              </button>
+            </div>
+          )}
+
+          {!isUser && onSpeech && (
+            <button 
+              onClick={handlePlayAudio}
+              title={message.generatedAudioUrl ? (isPlaying ? "Pause" : "Play") : "Read Aloud"}
+              className={`p-2 rounded-xl glass-gloss transition-all hover:scale-110 active:scale-95 ${message.generatedAudioUrl ? 'text-purple-400 bg-purple-500/10' : 'text-mirror-subtext hover:text-mirror-text'}`}
+            >
+              {message.generatedAudioUrl ? (
+                isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />
+              ) : (
+                <Volume2 className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
+
+          {message.generatedAudioUrl && (
+            <audio 
+              ref={audioRef}
+              src={message.generatedAudioUrl}
+              className="hidden"
+            />
+          )}
+
+          {!isUser && onRegenerate && !message.isStreaming && (
+            <button 
+              onClick={() => onRegenerate(message.id)} 
+              title="Regenerate Response"
+              className="p-2 rounded-xl glass-gloss text-mirror-subtext hover:text-mirror-accent transition-all hover:scale-110 active:scale-95"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
           )}
           
@@ -272,8 +390,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       </div>
 
       {isUser && (
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-700 to-black flex items-center justify-center shrink-0 mt-2 shadow-lg border border-white/10">
-          <User className="w-4 h-4 text-white" />
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-700 to-black flex items-center justify-center shrink-0 mt-2 shadow-lg border border-white/10 overflow-hidden">
+          {userAvatar ? (
+            <img src={userAvatar} alt="User" className="w-full h-full object-cover" />
+          ) : (
+            <User className="w-4 h-4 text-white" />
+          )}
         </div>
       )}
     </div>

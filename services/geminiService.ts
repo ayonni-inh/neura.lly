@@ -18,7 +18,6 @@ const retryWithBackoff = async <T>(
       lastError = error;
       
       // Check for retryable errors (503 Service Unavailable, 429 Too Many Requests)
-      // Inspect both error properties and the message string (which might contain nested JSON)
       const errorString = JSON.stringify(error, Object.getOwnPropertyNames(error));
       const messageString = error.message || '';
       const statusText = error.statusText || '';
@@ -58,7 +57,6 @@ export const generateImage = async (
 ): Promise<string[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Construct the enhanced prompt with style
   const styleInstruction = config.style !== 'None' ? ` in a ${config.style} style` : '';
   const fullPrompt = `${prompt}${styleInstruction}.`;
 
@@ -82,7 +80,7 @@ export const generateImage = async (
         aspectRatio: config.aspectRatio
       };
       
-      if (model === IMAGE_MODEL) {
+      if (model === 'gemini-3-pro-image-preview') {
         imageConfigParams.imageSize = config.imageSize;
       }
 
@@ -99,50 +97,160 @@ export const generateImage = async (
         throw new Error("Visualization engine failed to initialize (No candidates).");
       }
 
-      let modelText = '';
       for (const part of candidate.content?.parts || []) {
         if (part.inlineData) {
           return `data:image/png;base64,${part.inlineData.data}`;
-        }
-        if (part.text) {
-          modelText += part.text;
-        }
-      }
-
-      if (modelText) {
-        const cleanText = modelText
-          .replace(/^(I cannot|I can't|I am unable to|Model Response:|System:|Yes,|Sure,|Okay,|Of course,|Here is the image you requested:)/gi, '')
-          .trim();
-        if (cleanText.length > 0) {
-          throw new Error(cleanText);
         }
       }
       
       throw new Error("Visualization failed to materialize. The model returned an empty response.");
   };
 
-  const generateSingleImage = async (): Promise<string> => {
-    try {
-       return await performGeneration(IMAGE_MODEL);
-    } catch (error: any) {
-       console.warn(`Primary image model ${IMAGE_MODEL} failed, attempting fallback to ${FALLBACK_IMAGE_MODEL}`, error);
-       try {
-         return await performGeneration(FALLBACK_IMAGE_MODEL);
-       } catch (fallbackError) {
-         throw error; // Throw original error if fallback also fails
-       }
-    }
-  };
-
   try {
     // Execute parallel requests for the number of images requested
-    const promises = Array(config.numberOfImages).fill(null).map(() => generateSingleImage());
+    // Try Pro model first
+    const promises = Array(config.numberOfImages).fill(null).map(() => performGeneration('gemini-3-pro-image-preview'));
     const results = await Promise.all(promises);
     return results;
   } catch (error: any) {
-    console.error("Batch Image Generation Error:", error);
+    // Check for permission denied or not found (often means model not available to project)
+    const status = error.status || error.code || error.error?.code || error.error?.status;
+    const message = error.message || error.error?.message || JSON.stringify(error);
+    const errorString = JSON.stringify(error);
+    
+    if (
+      status === 403 || 
+      status === 404 || 
+      message.includes('PERMISSION_DENIED') || 
+      message.includes('The caller does not have permission') ||
+      message.includes('403') ||
+      errorString.includes('PERMISSION_DENIED') ||
+      errorString.includes('403')
+    ) {
+       console.warn("Pro model failed with permission/access error. Falling back to Flash.");
+       try {
+         const promises = Array(config.numberOfImages).fill(null).map(() => performGeneration('gemini-2.5-flash-image'));
+         const results = await Promise.all(promises);
+         return results;
+       } catch (fallbackError) {
+         console.error("Fallback Image Generation Error:", fallbackError);
+         throw fallbackError;
+       }
+    }
+    
+    console.error("Batch Image Generation Error (Pro):", error);
     throw error;
   }
+};
+
+export const editImage = async (
+  prompt: string,
+  image: Attachment
+): Promise<string> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const model = 'gemini-2.5-flash-image';
+
+  const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
+    model: model,
+    contents: {
+      parts: [
+        {
+          inlineData: {
+            mimeType: image.mimeType,
+            data: image.data
+          }
+        },
+        { text: prompt }
+      ]
+    }
+  }));
+
+  const candidate = response.candidates?.[0];
+  if (!candidate) throw new Error("Image editing failed.");
+
+  for (const part of candidate.content?.parts || []) {
+    if (part.inlineData) {
+      return `data:image/png;base64,${part.inlineData.data}`;
+    }
+  }
+  
+  throw new Error("Image editing returned no image data.");
+};
+
+export const generateVideo = async (
+  prompt: string,
+  image?: Attachment | null,
+  aspectRatio: '16:9' | '9:16' = '16:9'
+): Promise<string> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const model = 'veo-3.1-fast-generate-preview';
+
+  const request: any = {
+    model: model,
+    prompt: prompt,
+    config: {
+      numberOfVideos: 1,
+      resolution: '720p',
+      aspectRatio: aspectRatio
+    }
+  };
+
+  if (image) {
+    request.image = {
+      imageBytes: image.data,
+      mimeType: image.mimeType
+    };
+  }
+
+  let operation = await ai.models.generateVideos(request);
+
+  // Poll for completion
+  while (!operation.done) {
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    operation = await ai.operations.getVideosOperation({ operation: operation });
+  }
+
+  const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
+  if (!videoUri) throw new Error("Video generation failed.");
+
+  // Fetch the video content
+  const response = await fetch(videoUri, {
+    method: 'GET',
+    headers: {
+      'x-goog-api-key': process.env.API_KEY || '',
+    },
+  });
+
+  if (!response.ok) throw new Error("Failed to download generated video.");
+  
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+};
+
+export const generateSpeech = async (
+  text: string,
+  voiceName: string = 'Kore'
+): Promise<string> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const model = 'gemini-2.5-flash-preview-tts';
+
+  const response = await ai.models.generateContent({
+    model: model,
+    contents: [{ parts: [{ text }] }],
+    config: {
+      responseModalities: ['AUDIO'],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName }
+        }
+      }
+    }
+  });
+
+  const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  if (!base64Audio) throw new Error("Speech generation failed.");
+  
+  return `data:audio/mp3;base64,${base64Audio}`;
 };
 
 export const streamResponse = async (
@@ -150,9 +258,13 @@ export const streamResponse = async (
   newMessage: string,
   attachment: Attachment | null,
   onChunk: (text: string, sources?: GroundingSource[]) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  useFastModel: boolean = false
 ): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
+  // Select model based on preference
+  const selectedModel = useFastModel ? 'gemini-2.5-flash-lite-latest' : MODEL_NAME;
 
   // Filter and map history to ensure continuity even for image-only messages
   const contents: Content[] = history
@@ -208,7 +320,7 @@ export const streamResponse = async (
         temperature: 0.7,
         tools: [{ googleSearch: {} }],
         // Adjust thinking budget based on model capabilities if needed
-        thinkingConfig: { thinkingBudget: 4096 }
+        thinkingConfig: !useFastModel ? { thinkingBudget: 4096 } : undefined
       },
     }));
 
@@ -239,7 +351,7 @@ export const streamResponse = async (
   };
 
   try {
-    return await executeStream(MODEL_NAME);
+    return await executeStream(selectedModel);
   } catch (error: any) {
     if (error.name === 'AbortError') return '';
     
@@ -255,10 +367,8 @@ export const streamResponse = async (
       errorString.includes('503') ||
       errorString.includes('UNAVAILABLE');
 
-    if (isOverloaded) {
-       console.warn(`Primary model ${MODEL_NAME} overloaded. Switching to fallback: ${FALLBACK_MODEL_NAME}`);
-       // Clear any partial chunks from the failed attempt if necessary, 
-       // but typically we just start over.
+    if (isOverloaded && !useFastModel) {
+       console.warn(`Primary model ${selectedModel} overloaded. Switching to fallback: ${FALLBACK_MODEL_NAME}`);
        try {
          return await executeStream(FALLBACK_MODEL_NAME);
        } catch (fallbackError: any) {
