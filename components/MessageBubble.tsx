@@ -16,12 +16,13 @@ interface MessageBubbleProps {
   onToggleBookmark?: (id: string) => void;
   onFeedback?: (id: string, type: 'positive' | 'negative' | undefined) => void;
   onActionClick?: (actionText: string) => void;
-  onRerun?: (text: string, attachment?: Attachment) => void;
+  onRerun?: (text: string, attachments?: Attachment[]) => void;
   onRegenerate?: (id: string) => void;
   onContinue?: (id: string) => void;
   onSaveImage?: (url: string) => void;
   onStop?: () => void;
   onSpeech?: (text: string, id: string) => void;
+  autoPlay?: boolean;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ 
@@ -35,7 +36,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onRegenerate,
   onSaveImage,
   onStop,
-  onSpeech
+  onSpeech,
+  autoPlay
 }) => {
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -45,8 +47,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [showActions, setShowActions] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const audioRef = React.useRef<HTMLAudioElement>(null);
-
   const isUser = message.role === Role.USER;
+
+  React.useEffect(() => {
+    if (autoPlay && message.generatedAudioUrl && !isUser && audioRef.current) {
+      audioRef.current.play().catch(err => console.error("Auto-play failed:", err));
+      setIsPlaying(true);
+    }
+  }, [message.generatedAudioUrl, autoPlay, isUser]);
+
   const isError = message.isError;
   const hasStrategicFooter = !isUser && message.text.includes('**Insight:**');
   
@@ -158,8 +167,35 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <div key={idx} className="relative rounded-2xl overflow-hidden shadow-2xl border border-mirror-border group/img cursor-zoom-in" onClick={() => setZoomedImage(imgUrl)}>
                   <img src={imgUrl} alt={`Visual ${idx + 1}`} className="w-full h-auto object-cover transition-transform duration-700 group-hover/img:scale-105" />
                   
+                  <div className="absolute bottom-2 left-2 p-1.5 bg-black/40 backdrop-blur-md rounded-lg opacity-60 group-hover/img:opacity-100 transition-opacity">
+                    <Sparkles className="w-3 h-3 text-mirror-accent" />
+                  </div>
+                  
                   {/* Image-specific Quick Actions */}
-                  <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover/img:opacity-100 transition-all z-10">
+                  <div className="absolute inset-0 bg-black/20 opacity-0 group-hover/img:opacity-100 transition-all flex items-center justify-center gap-4">
+                     <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setZoomedImage(imgUrl);
+                      }}
+                      className="p-3 bg-white/20 hover:bg-white/40 backdrop-blur-md border border-white/30 rounded-full text-white shadow-xl transition-all hover:scale-110 active:scale-95"
+                      title="Full View"
+                    >
+                      <Plus className="w-6 h-6 rotate-45" />
+                    </button>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDownloadImage(imgUrl, message.timestamp);
+                      }}
+                      className="p-3 bg-mirror-accent/80 hover:bg-mirror-accent backdrop-blur-md border border-white/30 rounded-full text-white shadow-xl transition-all hover:scale-110 active:scale-95"
+                      title="Save to Device"
+                    >
+                      <Download className="w-6 h-6" />
+                    </button>
+                  </div>
+
+                  <div className="absolute top-2 right-2 flex gap-2 z-10 md:opacity-0 md:group-hover/img:opacity-100 transition-all">
                      <button 
                       onClick={(e) => {
                         e.stopPropagation();
@@ -169,16 +205,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       title={savedImageUrls.has(imgUrl) ? "Saved to Gallery" : "Save to Visual Assets"}
                     >
                       {savedImageUrls.has(imgUrl) ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                    </button>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDownloadImage(imgUrl, message.timestamp);
-                      }}
-                      className="p-2 bg-black/40 hover:bg-black/60 backdrop-blur-md border border-white/20 rounded-xl text-white shadow-lg transition-all hover:scale-110 active:scale-95"
-                      title="Save Image to Device"
-                    >
-                      <Download className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
@@ -192,7 +218,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 src={message.generatedVideoUrl} 
                 controls 
                 className="w-full h-auto"
-                poster={message.attachment?.mimeType.startsWith('image/') ? `data:${message.attachment.mimeType};base64,${message.attachment.data}` : undefined}
+                poster={(message.attachments?.[0] || message.attachment)?.mimeType.startsWith('image/') ? `data:${(message.attachments?.[0] || message.attachment)!.mimeType};base64,${(message.attachments?.[0] || message.attachment)!.data}` : undefined}
               />
             </div>
           )}
@@ -211,16 +237,33 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                    </button>
                    <button 
                     onClick={() => handleDownloadImage(zoomedImage, message.timestamp)}
-                    className="flex items-center gap-2 px-6 py-3 bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/20 rounded-2xl text-white font-bold text-xs uppercase tracking-widest transition-all"
+                    className="flex items-center gap-2 px-6 py-3 bg-mirror-accent/80 hover:bg-mirror-accent backdrop-blur-xl border border-white/20 rounded-2xl text-white font-bold text-xs uppercase tracking-widest transition-all shadow-lg"
                    >
-                     <Download className="w-4 h-4" /> High-Res
+                     <Download className="w-4 h-4" /> Save to Device
                    </button>
                  </div>
                </div>
             </div>
           )}
 
-          {message.attachment && (
+          {message.attachments && message.attachments.length > 0 && (
+            <div className="mb-4 flex flex-wrap gap-2">
+              {message.attachments.map((att, idx) => (
+                <div key={idx} className="rounded-xl overflow-hidden shadow-lg border border-mirror-border max-w-[200px]">
+                  {att.mimeType.startsWith('image/') ? (
+                    <img src={`data:${att.mimeType};base64,${att.data}`} alt={`Ref ${idx}`} className="w-full h-auto" />
+                  ) : (
+                    <div className="flex items-center gap-2 p-2 bg-mirror-text/5 rounded-xl border border-mirror-border text-xs text-mirror-subtext font-mono">
+                      <FileText className="w-4 h-4 text-mirror-accent" />
+                      {att.mimeType.split('/')[1].toUpperCase()}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {message.attachment && !message.attachments && (
             <div className="mb-4">
               {message.attachment.mimeType.startsWith('image/') ? (
                 <div className="rounded-xl overflow-hidden shadow-lg border border-mirror-border max-w-[200px]">
@@ -272,7 +315,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
           {isUser && onRerun && (
             <button 
-              onClick={() => onRerun(message.text, message.attachment)} 
+              onClick={() => onRerun(message.text, message.attachments || (message.attachment ? [message.attachment] : []))} 
               title="Rerun Prompt"
               className="p-2 rounded-xl glass-gloss text-mirror-subtext hover:text-mirror-accent transition-all hover:scale-110 active:scale-95"
             >

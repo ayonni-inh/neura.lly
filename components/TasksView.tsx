@@ -1,163 +1,132 @@
-import React, { useState, useEffect } from 'react';
+'use client';
+
+import React from 'react';
 import { Task } from '../types';
-import { db } from '../services/db';
-import { CheckCircle2, Circle, Trash2, Plus, Calendar, AlertCircle } from 'lucide-react';
+import { 
+  Plus, Trash2, CheckCircle2, Circle, 
+  Calendar, AlertCircle, Clock 
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
-export const TasksView: React.FC = () => {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [newTaskText, setNewTaskText] = useState('');
-  const [loading, setLoading] = useState(true);
+interface TasksViewProps {
+  tasks: Task[];
+  setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
+}
 
-  const fetchTasks = async () => {
-    setLoading(true);
-    try {
-      const data = await db.getTasks();
-      setTasks(data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-    } catch (error) {
-      console.error("Failed to fetch tasks", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+export const TasksView: React.FC<TasksViewProps> = ({ tasks, setTasks }) => {
+  const [newTask, setNewTask] = React.useState('');
 
-  useEffect(() => {
-    fetchTasks();
-  }, []);
-
-  const handleAddTask = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTaskText.trim()) return;
-
-    const newTask: Task = {
-      id: Date.now().toString(),
-      text: newTaskText.trim(),
+  const addTask = () => {
+    if (!newTask.trim()) return;
+    const task: Task = {
+      id: crypto.randomUUID(),
+      title: newTask.trim(),
       completed: false,
-      priority: 'medium',
-      createdAt: new Date()
+      createdAt: new Date().toISOString(),
+      priority: 'medium'
     };
-
-    try {
-      await db.saveTask(newTask);
-      setTasks(prev => [newTask, ...prev]);
-      setNewTaskText('');
-    } catch (error) {
-      console.error("Failed to save task", error);
-    }
+    setTasks(prev => [...prev, task]);
+    setNewTask('');
   };
 
-  const toggleTask = async (task: Task) => {
-    const updatedTask = { ...task, completed: !task.completed };
-    try {
-      await db.saveTask(updatedTask);
-      setTasks(prev => prev.map(t => t.id === task.id ? updatedTask : t));
-    } catch (error) {
-      console.error("Failed to update task", error);
-    }
+  const toggleTask = (id: string) => {
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
   };
 
-  const deleteTask = async (id: string) => {
-    try {
-      await db.deleteTask(id);
-      setTasks(prev => prev.filter(t => t.id !== id));
-    } catch (error) {
-      console.error("Failed to delete task", error);
-    }
+  const deleteTask = (id: string) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
   };
-
-  const activeTasks = tasks.filter(t => !t.completed);
-  const completedTasks = tasks.filter(t => t.completed);
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-8 duration-700 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-8">
+    <div className="max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-8 duration-700">
+      <div className="flex items-center justify-between mb-10">
         <div>
           <h1 className="text-4xl font-bold mb-2 tracking-tighter">Strategic Ledger</h1>
-          <p className="text-mirror-subtext">Action items and cognitive commitments.</p>
+          <p className="text-mirror-subtext">Neural task management and cognitive goals.</p>
         </div>
-        <div className="px-6 py-5 bg-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl text-center min-w-[130px] shadow-2xl">
-          <span className="block text-4xl font-bold text-mirror-accent mb-1">{activeTasks.length}</span>
-          <span className="text-[10px] font-bold text-mirror-subtext uppercase tracking-widest">Active</span>
+        <div className="flex items-center gap-4">
+          <div className="p-4 glass-gloss rounded-3xl text-center min-w-[120px]">
+            <span className="block text-2xl font-bold text-mirror-accent">
+              {tasks.filter(t => t.completed).length}/{tasks.length}
+            </span>
+            <span className="text-[10px] font-bold text-mirror-subtext uppercase tracking-widest">Efficiency</span>
+          </div>
         </div>
       </div>
 
-      <form onSubmit={handleAddTask} className="mb-8 relative group">
-        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-          <Plus className="h-5 w-5 text-mirror-subtext/40 group-focus-within:text-mirror-accent transition-colors" />
+      <div className="glass-matte rounded-[2.5rem] p-8 border border-mirror-border shadow-2xl mb-8">
+        <div className="flex gap-3 mb-8">
+          <input 
+            type="text" 
+            value={newTask}
+            onChange={(e) => setNewTask(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addTask()}
+            placeholder="Define a new cognitive objective..."
+            className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-mirror-text placeholder:text-mirror-subtext/30 focus:outline-none focus:border-mirror-accent focus:ring-1 focus:ring-mirror-accent transition-all"
+          />
+          <button 
+            onClick={addTask}
+            className="px-8 rounded-2xl bg-mirror-accent text-white font-bold hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg shadow-mirror-accent/20"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
         </div>
-        <input 
-          type="text" 
-          value={newTaskText}
-          onChange={(e) => setNewTaskText(e.target.value)}
-          placeholder="Add a new strategic objective..."
-          className="block w-full pl-12 pr-4 py-4 bg-mirror-text/5 border border-mirror-border rounded-2xl text-sm text-mirror-text placeholder:text-mirror-subtext/50 focus:outline-none focus:ring-2 focus:ring-mirror-accent/20 focus:border-mirror-accent/50 transition-all"
-        />
-      </form>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar space-y-6">
-        {loading ? (
-          <div className="text-center py-10 text-mirror-subtext">Loading ledger...</div>
-        ) : tasks.length === 0 ? (
-          <div className="text-center py-20 glass-matte rounded-[2.5rem] border border-dashed border-mirror-border">
-            <CheckCircle2 className="w-12 h-12 text-mirror-subtext/20 mx-auto mb-4" />
-            <p className="text-mirror-subtext text-sm">Ledger is empty. <br/> Capture insights and actions here.</p>
-          </div>
-        ) : (
-          <>
-            {activeTasks.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 px-2 pb-2 border-b border-mirror-border/50">
-                  <div className="w-2 h-2 rounded-full bg-mirror-accent animate-pulse" />
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-mirror-text">Active Objectives</h3>
-                  <span className="ml-auto text-[10px] font-mono text-mirror-subtext bg-mirror-text/5 px-2 py-0.5 rounded-full">{activeTasks.length}</span>
-                </div>
-                <div className="grid gap-3">
-                  {activeTasks.map(task => (
-                    <div key={task.id} className="group relative flex items-start gap-4 p-5 glass-matte rounded-2xl border border-mirror-border hover:border-mirror-accent/50 hover:shadow-lg hover:shadow-mirror-accent/5 transition-all duration-300">
-                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-mirror-accent/0 group-hover:bg-mirror-accent/50 rounded-l-2xl transition-all duration-300" />
-                      <button onClick={() => toggleTask(task)} className="mt-0.5 text-mirror-subtext hover:text-mirror-accent transition-colors">
-                        <Circle className="w-5 h-5" />
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <span className="block text-sm text-mirror-text font-medium leading-relaxed">{task.text}</span>
-                        <div className="flex items-center gap-3 mt-2 opacity-60 group-hover:opacity-100 transition-opacity">
-                          <span className="text-[10px] text-mirror-subtext flex items-center gap-1.5 bg-mirror-text/5 px-2 py-1 rounded-md">
-                            <Calendar className="w-3 h-3" /> {new Date(task.createdAt).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </div>
-                      <button onClick={() => deleteTask(task.id)} className="text-mirror-subtext/50 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 p-2 hover:bg-red-500/10 rounded-lg">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+        <div className="space-y-3">
+          <AnimatePresence mode="popLayout">
+            {tasks.length === 0 ? (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="py-12 text-center"
+              >
+                <Clock className="w-12 h-12 text-mirror-subtext/20 mx-auto mb-4" />
+                <p className="text-mirror-subtext text-sm">No strategic objectives defined.</p>
+              </motion.div>
+            ) : (
+              tasks.slice().reverse().map(task => (
+                <motion.div 
+                  key={task.id}
+                  layout
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  className={`group flex items-center gap-4 p-4 rounded-2xl border transition-all ${task.completed ? 'bg-white/5 border-white/5 opacity-60' : 'bg-white/5 border-white/10 hover:border-mirror-accent/30'}`}
+                >
+                  <button 
+                    onClick={() => toggleTask(task.id)}
+                    className={`transition-colors ${task.completed ? 'text-mirror-accent' : 'text-mirror-subtext hover:text-mirror-accent'}`}
+                  >
+                    {task.completed ? <CheckCircle2 className="w-6 h-6" /> : <Circle className="w-6 h-6" />}
+                  </button>
+                  <div className="flex-1">
+                    <p className={`text-sm font-medium ${task.completed ? 'line-through text-mirror-subtext' : 'text-mirror-text'}`}>
+                      {task.title}
+                    </p>
+                    <div className="flex items-center gap-3 mt-1">
+                      <span className="text-[9px] text-mirror-subtext/60 flex items-center gap-1">
+                        <Calendar className="w-3 h-3" /> {new Date(task.createdAt).toLocaleDateString()}
+                      </span>
+                      <span className={`text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded ${
+                        task.priority === 'high' ? 'bg-red-500/10 text-red-400' : 
+                        task.priority === 'medium' ? 'bg-yellow-500/10 text-yellow-400' : 
+                        'bg-blue-500/10 text-blue-400'
+                      }`}>
+                        {task.priority}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </div>
+                  <button 
+                    onClick={() => deleteTask(task.id)}
+                    className="p-2 rounded-xl opacity-0 group-hover:opacity-100 hover:bg-red-500/10 text-mirror-subtext hover:text-red-400 transition-all"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </motion.div>
+              ))
             )}
-
-            {completedTasks.length > 0 && (
-              <div className="space-y-4 pt-8">
-                <div className="flex items-center gap-2 px-2 pb-2 border-b border-mirror-border/30">
-                  <div className="w-2 h-2 rounded-full bg-green-500/50" />
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-mirror-subtext">Completed</h3>
-                  <span className="ml-auto text-[10px] font-mono text-mirror-subtext bg-mirror-text/5 px-2 py-0.5 rounded-full">{completedTasks.length}</span>
-                </div>
-                <div className="grid gap-2">
-                  {completedTasks.map(task => (
-                    <div key={task.id} className="group flex items-center gap-4 p-4 bg-mirror-text/[0.02] rounded-xl border border-transparent hover:border-mirror-border/30 transition-all">
-                      <button onClick={() => toggleTask(task)} className="text-green-500/70 hover:text-green-500 transition-colors">
-                        <CheckCircle2 className="w-5 h-5" />
-                      </button>
-                      <span className="flex-1 text-sm text-mirror-subtext/60 line-through decoration-mirror-subtext/30 group-hover:text-mirror-subtext transition-colors">{task.text}</span>
-                      <button onClick={() => deleteTask(task.id)} className="text-mirror-subtext/30 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 p-2">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        )}
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   );

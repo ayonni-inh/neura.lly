@@ -68,8 +68,8 @@ At the end of major responses, you MUST strictly include a structured footer:
 ---
 `;
 
-export const MODEL_NAME = 'gemini-3-flash-preview';
-export const FALLBACK_MODEL_NAME = 'gemini-2.5-flash';
+export const MODEL_NAME = 'gemini-3.1-pro-preview';
+export const FALLBACK_MODEL_NAME = 'gemini-flash-latest';
 
 export const IMAGE_MODEL = 'gemini-3-pro-image-preview';
 export const FALLBACK_IMAGE_MODEL = 'gemini-2.5-flash-image';

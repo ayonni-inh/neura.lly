@@ -12,8 +12,11 @@ export interface GroundingSource {
 }
 
 export interface Attachment {
+  id: string;
   mimeType: string;
   data: string; // Base64
+  url: string; // Data URL or Blob URL for preview
+  type: 'image' | 'video' | 'file';
 }
 
 export interface ImageGenerationConfig {
@@ -41,7 +44,8 @@ export interface Message {
   generatedImageUrls?: string[];
   generatedVideoUrl?: string;
   generatedAudioUrl?: string;
-  attachment?: Attachment;
+  attachment?: Attachment; // Keep for backward compatibility if needed, but prefer attachments
+  attachments?: Attachment[];
   isBookmarked?: boolean;
   feedback?: 'positive' | 'negative';
   isError?: boolean;
@@ -62,6 +66,18 @@ export interface ChatSession {
   updatedAt: Date;
 }
 
+export interface UserProfile {
+  name: string;
+  role: string;
+  goals: string[];
+  constraints: string[];
+  preferences: {
+    tone: 'professional' | 'casual' | 'concise' | 'detailed';
+    expertise: string;
+    interests: string[];
+  };
+}
+
 export enum ProcessingState {
   IDLE = 'idle',
   THINKING = 'thinking',
@@ -78,4 +94,13 @@ export interface LogEntry {
   level: 'info' | 'warn' | 'error';
   message: string;
   details?: any;
+}
+
+export type VoiceName = 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr';
+
+export interface VoiceSettings {
+  voiceName: VoiceName;
+  style: string;
+  enabled: boolean;
+  autoPlay: boolean;
 }

@@ -1,7 +1,7 @@
 
-import { GoogleGenAI, Content, Part, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, Content, Part, GenerateContentResponse, Type } from "@google/genai";
 import { MODEL_NAME, IMAGE_MODEL, SYSTEM_INSTRUCTION, FALLBACK_MODEL_NAME, FALLBACK_IMAGE_MODEL } from '../constants';
-import { Message, Role, Attachment, GroundingSource, ImageGenerationConfig } from '../types';
+import { Message, Role, Attachment, GroundingSource, ImageGenerationConfig, UserProfile } from '../types';
 
 // Helper for exponential backoff
 const retryWithBackoff = async <T>(
@@ -53,7 +53,7 @@ const retryWithBackoff = async <T>(
 export const generateImage = async (
   prompt: string, 
   config: ImageGenerationConfig, 
-  contextAttachment?: Attachment | null
+  contextAttachments?: Attachment[] | null
 ): Promise<string[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
@@ -63,14 +63,16 @@ export const generateImage = async (
   const performGeneration = async (model: string): Promise<string> => {
       const parts: Part[] = [];
       
-      if (contextAttachment) {
-        parts.push({
-          inlineData: {
-            mimeType: contextAttachment.mimeType,
-            data: contextAttachment.data
-          }
+      if (contextAttachments && contextAttachments.length > 0) {
+        contextAttachments.forEach(att => {
+          parts.push({
+            inlineData: {
+              mimeType: att.mimeType,
+              data: att.data
+            }
+          });
         });
-        parts.push({ text: `Create an image based on this reference and the following description: ${fullPrompt}. Return ONLY the generated image.` });
+        parts.push({ text: `Create an image based on these references and the following description: ${fullPrompt}. Return ONLY the generated image.` });
       } else {
         parts.push({ text: `Generate a high-quality image of: ${fullPrompt}. Return ONLY the image.` });
       }
@@ -145,23 +147,23 @@ export const generateImage = async (
 
 export const editImage = async (
   prompt: string,
-  image: Attachment
+  images: Attachment[]
 ): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const model = 'gemini-2.5-flash-image';
 
+  const parts: any[] = images.map(img => ({
+    inlineData: {
+      mimeType: img.mimeType,
+      data: img.data
+    }
+  }));
+  parts.push({ text: prompt });
+
   const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
     model: model,
     contents: {
-      parts: [
-        {
-          inlineData: {
-            mimeType: image.mimeType,
-            data: image.data
-          }
-        },
-        { text: prompt }
-      ]
+      parts: parts
     }
   }));
 
@@ -179,7 +181,7 @@ export const editImage = async (
 
 export const generateVideo = async (
   prompt: string,
-  image?: Attachment | null,
+  images?: Attachment[] | null,
   aspectRatio: '16:9' | '9:16' = '16:9'
 ): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -195,10 +197,13 @@ export const generateVideo = async (
     }
   };
 
-  if (image) {
+  if (images && images.length > 0) {
+    // Veo supports up to 3 reference images if using veo-3.1-generate-preview
+    // But for fast model, it usually takes one starting image.
+    // Let's use the first one for now or check if we should switch models.
     request.image = {
-      imageBytes: image.data,
-      mimeType: image.mimeType
+      imageBytes: images[0].data,
+      mimeType: images[0].mimeType
     };
   }
 
@@ -229,14 +234,17 @@ export const generateVideo = async (
 
 export const generateSpeech = async (
   text: string,
-  voiceName: string = 'Kore'
+  voiceName: string = 'Kore',
+  style: string = 'Normal'
 ): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const model = 'gemini-2.5-flash-preview-tts';
 
+  const prompt = style !== 'Normal' ? `Say ${style}: ${text}` : text;
+
   const response = await ai.models.generateContent({
     model: model,
-    contents: [{ parts: [{ text }] }],
+    contents: [{ parts: [{ text: prompt }] }],
     config: {
       responseModalities: ['AUDIO'],
       speechConfig: {
@@ -253,25 +261,65 @@ export const generateSpeech = async (
   return `data:audio/mp3;base64,${base64Audio}`;
 };
 
+export interface StreamResponseResult {
+  text: string;
+  functionCall?: {
+    name: string;
+    args: any;
+  };
+}
+
 export const streamResponse = async (
   history: Message[],
   newMessage: string,
-  attachment: Attachment | null,
+  attachments: Attachment[] | null,
   onChunk: (text: string, sources?: GroundingSource[]) => void,
   signal?: AbortSignal,
-  useFastModel: boolean = false
-): Promise<string> => {
+  useFastModel: boolean = false,
+  userProfile?: UserProfile | null
+): Promise<StreamResponseResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   // Select model based on preference
-  const selectedModel = useFastModel ? 'gemini-2.5-flash-lite-latest' : MODEL_NAME;
+  const selectedModel = useFastModel ? 'gemini-3.1-flash-lite-preview' : MODEL_NAME;
+
+  // Personalize system instruction
+  let personalizedInstruction = SYSTEM_INSTRUCTION;
+  if (userProfile) {
+    personalizedInstruction += `
+USER PROFILE CONTEXT:
+- Name: ${userProfile.name || 'User'}
+- Role: ${userProfile.role || 'Not specified'}
+- Strategic Goals: ${userProfile.goals.join(', ') || 'None specified'}
+- Constraints: ${userProfile.constraints.join(', ') || 'None specified'}
+- Tone Preference: ${userProfile.preferences.tone}
+- Core Expertise: ${userProfile.preferences.expertise || 'Not specified'}
+- Interests: ${userProfile.preferences.interests.join(', ') || 'None specified'}
+
+ADAPTATION RULES:
+1. Address the user by name if appropriate.
+2. Align advice with the user's role and expertise.
+3. Respect the stated constraints in all strategic suggestions.
+4. Maintain a ${userProfile.preferences.tone} tone.
+5. Prioritize the user's strategic goals in decision support.
+`;
+  }
 
   // Filter and map history to ensure continuity even for image-only messages
   const contents: Content[] = history
-    .filter(msg => msg.text || msg.attachment || (msg.generatedImageUrls && msg.generatedImageUrls.length > 0) || msg.generatedImageUrl)
+    .filter(msg => msg.text || msg.attachment || msg.attachments || (msg.generatedImageUrls && msg.generatedImageUrls.length > 0) || msg.generatedImageUrl)
     .map(msg => {
       const parts: Part[] = [];
-      if (msg.attachment) {
+      if (msg.attachments && msg.attachments.length > 0) {
+        msg.attachments.forEach(att => {
+          parts.push({
+            inlineData: {
+              mimeType: att.mimeType,
+              data: att.data
+            }
+          });
+        });
+      } else if (msg.attachment) {
         parts.push({
           inlineData: {
             mimeType: msg.attachment.mimeType,
@@ -293,12 +341,14 @@ export const streamResponse = async (
     });
 
   const currentParts: Part[] = [];
-  if (attachment) {
-    currentParts.push({
-      inlineData: {
-        mimeType: attachment.mimeType,
-        data: attachment.data
-      }
+  if (attachments && attachments.length > 0) {
+    attachments.forEach(att => {
+      currentParts.push({
+        inlineData: {
+          mimeType: att.mimeType,
+          data: att.data
+        }
+      });
     });
   }
   currentParts.push({ text: newMessage });
@@ -308,17 +358,56 @@ export const streamResponse = async (
     parts: currentParts
   });
 
-  const executeStream = async (model: string) => {
+  const executeStream = async (model: string): Promise<StreamResponseResult> => {
     let fullText = '';
     let sources: GroundingSource[] = [];
+    let functionCall: { name: string; args: any } | undefined = undefined;
 
     const responseStream = await retryWithBackoff<any>(() => ai.models.generateContentStream({
       model: model,
       contents: contents,
       config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
+        systemInstruction: personalizedInstruction,
         temperature: 0.7,
-        tools: [{ googleSearch: {} }],
+        tools: [
+          {
+            functionDeclarations: [
+              {
+                name: "generate_image",
+                description: "Generate a new image based on the user's prompt.",
+                parameters: {
+                  type: Type.OBJECT,
+                  properties: {
+                    prompt: { type: Type.STRING, description: "The prompt to generate the image" }
+                  },
+                  required: ["prompt"]
+                }
+              },
+              {
+                name: "edit_image",
+                description: "Edit an existing image based on the user's prompt.",
+                parameters: {
+                  type: Type.OBJECT,
+                  properties: {
+                    prompt: { type: Type.STRING, description: "The prompt to edit the image" }
+                  },
+                  required: ["prompt"]
+                }
+              },
+              {
+                name: "generate_video",
+                description: "Generate a video based on the user's prompt.",
+                parameters: {
+                  type: Type.OBJECT,
+                  properties: {
+                    prompt: { type: Type.STRING, description: "The prompt to generate the video" }
+                  },
+                  required: ["prompt"]
+                }
+              }
+            ]
+          }
+        ],
         // Adjust thinking budget based on model capabilities if needed
         thinkingConfig: !useFastModel ? { thinkingBudget: 4096 } : undefined
       },
@@ -330,6 +419,16 @@ export const streamResponse = async (
       }
 
       const c = chunk as GenerateContentResponse;
+      
+      if (c.functionCalls && c.functionCalls.length > 0) {
+        const call = c.functionCalls[0];
+        functionCall = {
+          name: call.name,
+          args: call.args
+        };
+        break; // Stop streaming if a function call is made
+      }
+
       const text = c.text;
       
       const groundingChunks = c.candidates?.[0]?.groundingMetadata?.groundingChunks;
@@ -347,13 +446,13 @@ export const streamResponse = async (
         onChunk(fullText, sources.length > 0 ? sources : undefined);
       }
     }
-    return fullText;
+    return { text: fullText, functionCall };
   };
 
   try {
     return await executeStream(selectedModel);
   } catch (error: any) {
-    if (error.name === 'AbortError') return '';
+    if (error.name === 'AbortError') return { text: '' };
     
     // Check for high demand / service unavailable errors
     const errorString = JSON.stringify(error, Object.getOwnPropertyNames(error));
@@ -361,18 +460,26 @@ export const streamResponse = async (
     const isOverloaded = 
       error.status === 503 || 
       error.code === 503 ||
+      error.status === 404 ||
+      error.code === 404 ||
       messageString.includes('503') || 
+      messageString.includes('404') ||
       messageString.includes('high demand') ||
       messageString.includes('UNAVAILABLE') ||
+      messageString.includes('NOT_FOUND') ||
+      messageString.includes('Requested entity was not found') ||
       errorString.includes('503') ||
-      errorString.includes('UNAVAILABLE');
+      errorString.includes('404') ||
+      errorString.includes('UNAVAILABLE') ||
+      errorString.includes('NOT_FOUND');
 
     if (isOverloaded && !useFastModel) {
-       console.warn(`Primary model ${selectedModel} overloaded. Switching to fallback: ${FALLBACK_MODEL_NAME}`);
+       const reason = error.status === 404 || error.code === 404 || messageString.includes('404') ? 'Model Not Found' : 'Service Overloaded';
+       console.warn(`[Gemini Service] Primary model ${selectedModel} failed (${reason}). Switching to fallback: ${FALLBACK_MODEL_NAME}`);
        try {
          return await executeStream(FALLBACK_MODEL_NAME);
        } catch (fallbackError: any) {
-         if (fallbackError.name === 'AbortError') return '';
+         if (fallbackError.name === 'AbortError') return { text: '' };
          console.error("Fallback Model Error:", fallbackError);
          throw fallbackError;
        }

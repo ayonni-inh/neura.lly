@@ -1,18 +1,19 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Message, Role, ProcessingState, Attachment, AppTheme, ChatSession, Task, ImageGenerationConfig, SavedImage } from './types';
+import { Message, Role, ProcessingState, Attachment, AppTheme, ChatSession, Task, ImageGenerationConfig, SavedImage, UserProfile, VoiceSettings, VoiceName } from './types';
 import { streamResponse, generateImage, editImage, generateVideo, generateSpeech } from './services/geminiService';
 import { db } from './services/db';
 import { MessageBubble } from './components/MessageBubble';
 import { ThinkingIndicator } from './components/ThinkingIndicator';
 import { LogsView } from './components/LogsView';
 import { TasksView } from './components/TasksView';
+import { ProfileView } from './components/ProfileView';
 import { Onboarding } from './components/Onboarding';
 import { 
   Send, X, Trash2, User,
   ChevronLeft, ChevronRight, ChevronDown, FileText, 
-  Sun, Moon, RefreshCw, Sparkles, MessageSquare, Plus, 
-  CheckCircle2, ListTodo, Printer, Cpu,
+  Sun, Moon, RefreshCw, Sparkles, MessageSquare, Plus, Play,
+  CheckCircle2, ListTodo, Printer, Cpu, Volume2,
   ImagePlus, Fingerprint, Sliders, Upload, CreditCard, LayoutGrid, Download, Ban, Activity, LogOut, Zap, Brain, AlertCircle, Check, Film
 } from 'lucide-react';
 
@@ -342,14 +343,7 @@ const App: React.FC = () => {
 
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 
-  const [tasks, setTasks] = useState<Task[]>(() => {
-    try {
-      const saved = localStorage.getItem(TASKS_KEY);
-      if (!saved) return [];
-      const parsed = JSON.parse(saved);
-      return parsed.map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) }));
-    } catch (e) { return []; }
-  });
+  const [tasks, setTasks] = useState<Task[]>([]);
 
   const [theme, setTheme] = useState<AppTheme>(() => {
     try {
@@ -358,15 +352,69 @@ const App: React.FC = () => {
     } catch (e) { return 'dark'; }
   });
 
-  const [view, setView] = useState<'chat' | 'gallery' | 'logs' | 'tasks'>('chat');
+  const [view, setView] = useState<'chat' | 'gallery' | 'logs' | 'tasks' | 'profile'>('chat');
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [processingState, setProcessingState] = useState<ProcessingState>(ProcessingState.IDLE);
-  const [attachment, setAttachment] = useState<Attachment | null>(null);
-  const [generationMode, setGenerationMode] = useState<'chat' | 'image' | 'video'>('chat');
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isFastMode, setIsFastMode] = useState(true);
   const [zoomedImage, setZoomedImage] = useState<SavedImage | null>(null);
+  const [hasKey, setHasKey] = useState(false);
   
+  const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(() => {
+    try {
+      const saved = localStorage.getItem('neurAlly_voice_settings');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {
+      voiceName: 'Kore',
+      style: 'Normal',
+      enabled: true,
+      autoPlay: false
+    };
+  });
+  const [showVoiceSettings, setShowVoiceSettings] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('neurAlly_voice_settings', JSON.stringify(voiceSettings));
+  }, [voiceSettings]);
+
+  // Check for API key selection
+  useEffect(() => {
+    const checkKey = async () => {
+      if (window.aistudio) {
+        try {
+          const has = await window.aistudio.hasSelectedApiKey();
+          setHasKey(has);
+        } catch (e) {
+          console.error("Failed to check API key status", e);
+        }
+      } else {
+        setHasKey(true);
+      }
+    };
+    checkKey();
+    
+    // Periodic check
+    const interval = setInterval(checkKey, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Periodic save for active session (continuity insurance)
+  useEffect(() => {
+    if (!currentSessionId || processingState !== ProcessingState.IDLE) return;
+    
+    const interval = setInterval(() => {
+      const session = sessions.find(s => s.id === currentSessionId);
+      if (session) {
+        db.saveSession(session).catch(console.error);
+      }
+    }, 60000); // Every minute
+    
+    return () => clearInterval(interval);
+  }, [currentSessionId, sessions, processingState]);
+
   // Image Generation Config State
   const [imageConfig, setImageConfig] = useState<ImageGenerationConfig>({
     style: 'None',
@@ -380,7 +428,7 @@ const App: React.FC = () => {
 
   const handleSpeech = async (text: string, messageId: string) => {
     try {
-      const audioUrl = await generateSpeech(text);
+      const audioUrl = await generateSpeech(text, voiceSettings.voiceName, voiceSettings.style);
       updateSessionMessages(currentSessionId!, msgs => msgs.map(m => 
         m.id === messageId ? { ...m, generatedAudioUrl: audioUrl } : m
       ));
@@ -442,10 +490,15 @@ const App: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
-        let [loadedSessions, loadedImages] = await Promise.all([
+        let [loadedSessions, loadedImages, loadedProfile, loadedTasks] = await Promise.all([
           db.getSessions(),
-          db.getImages()
+          db.getImages(),
+          db.getProfile(),
+          db.getTasks()
         ]);
+
+        setUserProfile(loadedProfile);
+        setTasks(loadedTasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
 
         // Migration from LocalStorage if DB is empty
         if (loadedSessions.length === 0) {
@@ -479,6 +532,20 @@ const App: React.FC = () => {
                 } catch (e) { console.error("Migration failed for images", e); }
             }
         }
+
+        if (loadedTasks.length === 0) {
+            const localTasks = localStorage.getItem(TASKS_KEY);
+            if (localTasks) {
+                try {
+                    const parsed = JSON.parse(localTasks);
+                    const migrated = parsed.map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) }));
+                    for (const t of migrated) {
+                        await db.saveTask(t);
+                    }
+                    setTasks(migrated.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+                } catch (e) { console.error("Migration failed for tasks", e); }
+            }
+        }
         
         setSessions(loadedSessions.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()));
         setSavedImages(loadedImages.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
@@ -488,7 +555,8 @@ const App: React.FC = () => {
         if (lastId && loadedSessions.some(s => s.id === lastId)) {
           setCurrentSessionId(lastId);
         } else if (loadedSessions.length > 0) {
-          setCurrentSessionId(loadedSessions[loadedSessions.length - 1].id);
+          // loadedSessions is sorted descending, so index 0 is the newest
+          setCurrentSessionId(loadedSessions[0].id);
         }
       } catch (e) {
         console.error("Failed to load data from DB", e);
@@ -626,10 +694,10 @@ const App: React.FC = () => {
     document.body.removeChild(link);
   };
 
-  const handleSend = async (customText?: string, mode: 'chat' | 'image' | 'video' = generationMode, customAttachment?: Attachment | null) => {
+  const handleSend = async (customText?: string, customAttachments?: Attachment[]) => {
     const textToSubmit = customText !== undefined ? customText : inputValue.trim();
-    const activeAttachment = customAttachment !== undefined ? customAttachment : attachment;
-    if ((!textToSubmit && !activeAttachment) || processingState !== ProcessingState.IDLE) return;
+    const activeAttachments = customAttachments !== undefined ? customAttachments : attachments;
+    if ((!textToSubmit && activeAttachments.length === 0) || processingState !== ProcessingState.IDLE) return;
     
     let activeId = currentSessionId;
     if (!activeId) {
@@ -647,12 +715,12 @@ const App: React.FC = () => {
     }
 
     setInputValue('');
-    setAttachment(null);
+    setAttachments([]);
     setProcessingState(ProcessingState.THINKING);
     setShowImageSettings(false);
     
     const newUserMsg: Message = { 
-      id: Date.now().toString(), role: Role.USER, text: textToSubmit, timestamp: new Date(), attachment: activeAttachment || undefined 
+      id: Date.now().toString(), role: Role.USER, text: textToSubmit, timestamp: new Date(), attachments: activeAttachments.length > 0 ? activeAttachments : undefined 
     };
     
     updateSessionMessages(activeId, (msgs) => [...msgs, newUserMsg]);
@@ -663,77 +731,77 @@ const App: React.FC = () => {
       const botMsgId = (Date.now() + 1).toString();
       updateSessionMessages(activeId, (msgs) => [...msgs, { id: botMsgId, role: Role.MODEL, text: '', timestamp: new Date(), isStreaming: true }]);
       
-      if (mode === 'image') {
-        setProcessingState(ProcessingState.IMAGEN);
+      let accumulatedText = '';
+      
+      const response = await streamResponse(
+        messages, // History excluding current user msg (handled in service)
+        textToSubmit,
+        activeAttachments.length > 0 ? activeAttachments : null,
+        (text, sources) => {
+            setProcessingState(ProcessingState.STREAMING);
+            accumulatedText = text;
+            updateSessionMessages(activeId!, msgs => msgs.map(m => 
+              m.id === botMsgId ? { ...m, text: text, sources: sources } : m
+            ));
+        },
+        abortControllerRef.current.signal,
+        isFastMode,
+        userProfile
+      );
+
+      if (response.functionCall) {
+        const { name, args } = response.functionCall;
+        const prompt = args.prompt || textToSubmit;
         
-        // Check if we are editing an image or generating a new one
-        if (activeAttachment && activeAttachment.mimeType.startsWith('image/')) {
-           // Image Editing Mode
-           setProcessingState(ProcessingState.EDITING_IMAGE);
-           const editedImageUrl = await editImage(textToSubmit, activeAttachment);
-           
-           updateSessionMessages(activeId, msgs => msgs.map(m => 
+        if (name === 'generate_image') {
+          setProcessingState(ProcessingState.IMAGEN);
+          const generatedImages = await generateImage(prompt, imageConfig, activeAttachments);
+          
+          updateSessionMessages(activeId, msgs => msgs.map(m => 
             m.id === botMsgId ? { 
               ...m, 
-              text: `I've edited the image as requested: "${textToSubmit}"`, 
+              text: response.text || `I've visualized your concept: "${prompt}"`, 
+              generatedImageUrls: generatedImages, 
+              isStreaming: false 
+            } : m
+          ));
+        } else if (name === 'edit_image') {
+          setProcessingState(ProcessingState.EDITING_IMAGE);
+          const imageAttachments = activeAttachments.filter(att => att.mimeType.startsWith('image/'));
+          const editedImageUrl = await editImage(prompt, imageAttachments);
+          
+          updateSessionMessages(activeId, msgs => msgs.map(m => 
+            m.id === botMsgId ? { 
+              ...m, 
+              text: response.text || `I've edited the image${imageAttachments.length > 1 ? 's' : ''} as requested: "${prompt}"`, 
               generatedImageUrls: [editedImageUrl], 
               isStreaming: false 
             } : m
           ));
-        } else {
-           // Standard Image Generation
-           const generatedImages = await generateImage(textToSubmit, imageConfig, activeAttachment);
-           
-           updateSessionMessages(activeId, msgs => msgs.map(m => 
-             m.id === botMsgId ? { 
-               ...m, 
-               text: `I've visualized your concept: "${textToSubmit}"`, 
-               generatedImageUrls: generatedImages, 
-               isStreaming: false 
-             } : m
-           ));
+        } else if (name === 'generate_video') {
+          setProcessingState(ProcessingState.GENERATING_VIDEO);
+          const videoUrl = await generateVideo(prompt, activeAttachments);
+          
+          updateSessionMessages(activeId, msgs => msgs.map(m => 
+            m.id === botMsgId ? { 
+              ...m, 
+              text: response.text || `I've generated a video for you: "${prompt}"`, 
+              generatedVideoUrl: videoUrl, 
+              isStreaming: false 
+            } : m
+          ));
         }
-      } else if (generationMode === 'video' || textToSubmit.toLowerCase().startsWith('/animate')) {
-        // Video Generation Mode
-        setProcessingState(ProcessingState.GENERATING_VIDEO);
-        const prompt = textToSubmit.replace('/animate', '').trim() || "Animate this";
-        const videoUrl = await generateVideo(prompt, activeAttachment);
-        
-        updateSessionMessages(activeId, msgs => msgs.map(m => 
-          m.id === botMsgId ? { 
-            ...m, 
-            text: `I've generated a video for you: "${prompt}"`, 
-            generatedVideoUrl: videoUrl, 
-            isStreaming: false 
-          } : m
-        ));
-        setGenerationMode('chat');
-
       } else {
-        setProcessingState(ProcessingState.THINKING);
-        
-        // Stream text response
-        let accumulatedText = '';
-        
-        await streamResponse(
-          messages, // History excluding current user msg (handled in service)
-          textToSubmit,
-          activeAttachment || null,
-          (text, sources) => {
-             setProcessingState(ProcessingState.STREAMING);
-             accumulatedText = text;
-             updateSessionMessages(activeId!, msgs => msgs.map(m => 
-               m.id === botMsgId ? { ...m, text: text, sources: sources } : m
-             ));
-          },
-          abortControllerRef.current.signal,
-          isFastMode
-        );
-
         updateSessionMessages(activeId, msgs => msgs.map(m => 
           m.id === botMsgId ? { ...m, isStreaming: false } : m
         ));
+
+        // Auto-play speech if enabled
+        if (voiceSettings.enabled && voiceSettings.autoPlay && accumulatedText) {
+          handleSpeech(accumulatedText, botMsgId);
+        }
       }
+
     } catch (e: any) {
       console.error(e);
       if (e.name !== 'AbortError') {
@@ -741,19 +809,36 @@ const App: React.FC = () => {
         let detailedError = "";
         
         // Error Parsing Logic
+        let troubleshooting = "";
+        
         if (typeof errorMsg === 'string') {
           if (errorMsg.includes("403") || errorMsg.includes("PERMISSION_DENIED")) {
             errorMsg = "Authorization Failure (403)";
-            detailedError = "Access denied. Ensure your Google Cloud Project has billing enabled and the API key is valid.";
+            detailedError = "Access denied. The neural link could not be established due to insufficient permissions.";
+            troubleshooting = "- Verify your API key is active and valid.\n- Ensure billing is enabled on your Google Cloud project.\n- Check if the Gemini API is enabled in your project console.";
+          } else if (errorMsg.includes("404") || errorMsg.includes("NOT_FOUND") || errorMsg.includes("Requested entity was not found")) {
+            errorMsg = "Neural Link Not Found (404)";
+            detailedError = "The requested model was not found or requires a paid API key selection.";
+            troubleshooting = "- Click the 'Select API Key' prompt if it appeared.\n- Ensure you have selected a key from a **paid project** (billing must be enabled).\n- The model 'gemini-3.1-pro-preview' requires a paid tier; try switching to **'Fast Mode'** if you don't have one.\n- Visit [ai.google.dev/gemini-api/docs/billing](https://ai.google.dev/gemini-api/docs/billing) for setup details.";
+            if (window.aistudio) {
+               window.aistudio.openSelectKey().catch(console.error);
+            }
           } else if (errorMsg.includes("400") || errorMsg.includes("INVALID_ARGUMENT")) {
             errorMsg = "Invalid Request (400)";
-            detailedError = "The parameters provided were invalid. Try simplifying the prompt.";
+            detailedError = "The parameters provided were invalid or the request was malformed.";
+            troubleshooting = "- Try simplifying your prompt.\n- If you attached a file, ensure it's a supported format (Image/PDF).\n- Check for any unusual characters in your input.";
           } else if (errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED")) {
             errorMsg = "Neural Overload (429)";
-            detailedError = "Rate limit exceeded. Please wait a moment before retrying.";
+            detailedError = "Rate limit exceeded. The system is currently handling too many requests.";
+            troubleshooting = "- Wait 30-60 seconds before retrying.\n- Check your quota limits in the Google AI Studio dashboard.\n- Consider using 'Fast Mode' for simpler queries.\n- **Try sending your message again in a few moments.**";
           } else if (errorMsg.includes("SAFETY") || errorMsg.includes("blocked")) {
             errorMsg = "Safety Protocol Engaged";
-            detailedError = "Content generation was blocked by safety filters. Please refine your prompt.";
+            detailedError = "Content generation was blocked by safety filters designed to prevent harmful output.";
+            troubleshooting = "- Refine your prompt to be more specific and neutral.\n- Avoid sensitive or controversial topics that might trigger filters.\n- If this was a mistake, try rephrasing the core intent.";
+          } else if (errorMsg.includes("fetch") || errorMsg.includes("NetworkError")) {
+            errorMsg = "Network Disruption";
+            detailedError = "A connection error occurred while communicating with the neural core.";
+            troubleshooting = "- Check your internet connection.\n- Ensure you are not behind a restrictive firewall or VPN.\n- **Refresh the application and try your request again.**";
           }
         }
 
@@ -761,12 +846,10 @@ const App: React.FC = () => {
           timestamp: new Date(),
           level: 'error',
           message: errorMsg,
-          details: { detailedError, originalError: e.message }
+          details: { detailedError, originalError: e.message, troubleshooting }
         });
         
-        const formattedText = detailedError 
-          ? `### ⚠️ ${errorMsg}\n${detailedError}\n\n\`\`\`\n${e.message.slice(0, 150)}${e.message.length > 150 ? '...' : ''}\n\`\`\`` 
-          : `### ⚠️ Error Detected\n${errorMsg}`;
+        const formattedText = `### ⚠️ ${errorMsg}\n${detailedError}\n\n${troubleshooting ? `**Troubleshooting:**\n${troubleshooting}\n\n` : ''}**Technical Details:**\n\`\`\`\n${e.message.slice(0, 200)}${e.message.length > 200 ? '...' : ''}\n\`\`\``;
 
         updateSessionMessages(activeId, (msgs) => [...msgs, { 
           id: Date.now().toString(), 
@@ -816,7 +899,7 @@ const App: React.FC = () => {
     updateSessionMessages(currentSessionId, (msgs) => msgs.slice(0, userMsgIndex));
     
     // Resend
-    handleSend(userMsg.text, 'chat', userMsg.attachment);
+    handleSend(userMsg.text, userMsg.attachments || (userMsg.attachment ? [userMsg.attachment] : []));
   };
 
   const updateSessionMessages = (sessionId: string, updater: (msgs: Message[]) => Message[]) => {
@@ -834,6 +917,7 @@ const App: React.FC = () => {
   const addTask = (text: string) => {
     const newTask: Task = { id: Date.now().toString(), text, completed: false, priority: 'medium', createdAt: new Date() };
     setTasks(prev => [newTask, ...prev]);
+    db.saveTask(newTask).catch(e => console.error("Failed to save task", e));
   };
 
   return (
@@ -894,6 +978,9 @@ const App: React.FC = () => {
                 <button onClick={() => { setView('logs'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[11px] font-medium transition-all ${view === 'logs' ? 'bg-mirror-accent text-white' : 'text-mirror-subtext hover-surface'}`}>
                   <Activity className="w-3.5 h-3.5" /> System Logs
                 </button>
+                <button onClick={() => { setView('profile'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[11px] font-medium transition-all ${view === 'profile' ? 'bg-mirror-accent text-white' : 'text-mirror-subtext hover-surface'}`}>
+                  <User className="w-3.5 h-3.5" /> Neural Profile
+                </button>
               </nav>
 
               <div className="flex-1 overflow-y-auto no-scrollbar space-y-4">
@@ -919,6 +1006,14 @@ const App: React.FC = () => {
               </div>
 
               <div className="mt-auto pt-4 border-t border-mirror-border flex flex-col gap-2">
+                {(!hasKey && window.aistudio) && (
+                  <button 
+                    onClick={() => window.aistudio.openSelectKey().then(() => setHasKey(true))}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 hover:bg-yellow-400/20 transition-all mb-2"
+                  >
+                    <Fingerprint className="w-3.5 h-3.5" /> Select API Key
+                  </button>
+                )}
                 <div className="flex gap-2">
                   <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2.5 rounded-xl text-mirror-subtext hover:bg-white/5 hover:text-mirror-text flex-1 flex justify-center transition-all" title="Toggle Theme">
                     {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -938,7 +1033,7 @@ const App: React.FC = () => {
               </button>
               <div className="ml-4 md:ml-6 flex flex-col">
                 <h2 className="text-sm font-bold tracking-tight text-mirror-text truncate max-w-[200px] md:max-w-none">
-                   {view === 'chat' ? (currentSession?.title || 'Synthesis') : view === 'gallery' ? 'Visual Assets' : view === 'tasks' ? 'Strategic Ledger' : 'System Logs'}
+                   {view === 'chat' ? (currentSession?.title || 'Synthesis') : view === 'gallery' ? 'Visual Assets' : view === 'tasks' ? 'Strategic Ledger' : view === 'profile' ? 'Neural Profile' : 'System Logs'}
                 </h2>
                 <span className="text-[9px] uppercase tracking-widest text-mirror-subtext font-mono hidden md:inline-block">neurAlly Neural Active</span>
               </div>
@@ -997,6 +1092,7 @@ const App: React.FC = () => {
                             onSaveImage={(url) => handleSaveImage(url, msg.text)}
                             onFeedback={(id, type) => updateSessionMessages(currentSessionId!, msgs => msgs.map(m => m.id === id ? { ...m, feedback: type } : m))}
                             onRegenerate={handleRegenerate}
+                            onRerun={(text, atts) => { setInputValue(text); if (atts) setAttachments(atts); }}
                             onStop={processingState !== ProcessingState.IDLE && msg.role === Role.USER && idx === messages.length - 2 ? handleStopGeneration : undefined}
                             onSpeech={handleSpeech}
                           />
@@ -1070,7 +1166,9 @@ const App: React.FC = () => {
                     </div>
                   </div>
                 ) : view === 'tasks' ? (
-                  <TasksView />
+                  <TasksView tasks={tasks} setTasks={setTasks} />
+                ) : view === 'profile' ? (
+                  <ProfileView profile={userProfile} onUpdate={setUserProfile} />
                 ) : (
                   <LogsView />
                 )}
@@ -1111,6 +1209,111 @@ const App: React.FC = () => {
                  </div>
               </div>
             )}
+
+            {/* Voice Settings Modal */}
+            <AnimatePresence>
+              {showVoiceSettings && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl" onClick={() => setShowVoiceSettings(false)}>
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                    className="w-full max-w-md glass-card border border-white/10 rounded-[32px] p-8 overflow-hidden relative shadow-2xl"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between mb-8">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-2xl bg-mirror-accent/20 flex items-center justify-center">
+                          <Volume2 className="w-6 h-6 text-mirror-accent" />
+                        </div>
+                        <div>
+                          <h2 className="text-xl font-bold text-mirror-text tracking-tight">Audio Matrix</h2>
+                          <p className="text-[10px] text-mirror-subtext uppercase tracking-widest font-bold">Neural Voice Synthesis</p>
+                        </div>
+                      </div>
+                      <button onClick={() => setShowVoiceSettings(false)} className="p-2 rounded-xl hover:bg-white/5 text-mirror-subtext transition-all">
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-8">
+                      <div className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5">
+                        <div>
+                          <p className="text-sm font-bold text-mirror-text">Voice Feedback</p>
+                          <p className="text-[10px] text-mirror-subtext">Enable neural speech synthesis</p>
+                        </div>
+                        <button 
+                          onClick={() => setVoiceSettings(prev => ({ ...prev, enabled: !prev.enabled }))}
+                          className={`w-12 h-6 rounded-full transition-all relative ${voiceSettings.enabled ? 'bg-mirror-accent' : 'bg-white/10'}`}
+                        >
+                          <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${voiceSettings.enabled ? 'left-7' : 'left-1'}`} />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5">
+                        <div>
+                          <p className="text-sm font-bold text-mirror-text">Auto-Play</p>
+                          <p className="text-[10px] text-mirror-subtext">Read responses automatically</p>
+                        </div>
+                        <button 
+                          onClick={() => setVoiceSettings(prev => ({ ...prev, autoPlay: !prev.autoPlay }))}
+                          className={`w-12 h-6 rounded-full transition-all relative ${voiceSettings.autoPlay ? 'bg-mirror-accent' : 'bg-white/10'}`}
+                        >
+                          <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${voiceSettings.autoPlay ? 'left-7' : 'left-1'}`} />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-6">
+                        <div className="space-y-3">
+                          <label className="text-[10px] font-bold text-mirror-subtext uppercase tracking-widest px-1">Voice Persona</label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {(['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'] as VoiceName[]).map(v => (
+                              <button 
+                                key={v}
+                                onClick={() => setVoiceSettings(prev => ({ ...prev, voiceName: v }))}
+                                className={`p-3 rounded-xl text-[11px] font-bold transition-all border ${voiceSettings.voiceName === v ? 'bg-mirror-accent text-white border-mirror-accent' : 'bg-white/5 text-mirror-subtext border-white/5 hover:bg-white/10'}`}
+                              >
+                                {v}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <label className="text-[10px] font-bold text-mirror-subtext uppercase tracking-widest px-1">Speaking Style</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {[
+                              { id: 'Normal', label: 'Normal' },
+                              { id: 'cheerful', label: 'Cheerful' },
+                              { id: 'serious', label: 'Serious' },
+                              { id: 'whispering', label: 'Whispering' },
+                              { id: 'excited', label: 'Excited' },
+                              { id: 'calm', label: 'Calm' }
+                            ].map(s => (
+                              <button 
+                                key={s.id}
+                                onClick={() => setVoiceSettings(prev => ({ ...prev, style: s.id }))}
+                                className={`p-3 rounded-xl text-[11px] font-bold transition-all border ${voiceSettings.style === s.id ? 'bg-mirror-accent text-white border-mirror-accent' : 'bg-white/5 text-mirror-subtext border-white/5 hover:bg-white/10'}`}
+                              >
+                                {s.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button 
+                        onClick={() => handleSpeech("Neural link established. Voice synthesis operational.", "test-voice")}
+                        className="w-full py-4 rounded-2xl bg-white/5 border border-white/10 text-mirror-text text-sm font-bold hover:bg-white/10 transition-all flex items-center justify-center gap-2 group"
+                      >
+                        <Play className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                        Test Voice Configuration
+                      </button>
+                    </div>
+                  </motion.div>
+                </div>
+              )}
+            </AnimatePresence>
 
             {/* Scroll to Bottom Button */}
             {showScrollBottom && view === 'chat' && (
@@ -1210,27 +1413,41 @@ const App: React.FC = () => {
                   )}
 
                   <div className="relative glass-dock rounded-[2.5rem] p-3 shadow-2xl border border-white/5">
-                    {attachment && (
-                      <div className="mx-2 mb-3 p-3 rounded-2xl bg-mirror-text/5 flex items-center gap-4 border border-mirror-border/50 backdrop-blur-md">
-                        <div className="w-12 h-12 rounded-xl bg-black border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
-                          {attachment.mimeType.startsWith('image/') ? <img src={`data:${attachment.mimeType};base64,${attachment.data}`} className="w-full h-full object-cover" /> : <FileText className="w-6 h-6 text-mirror-accent" />}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="block text-[10px] font-bold text-mirror-subtext uppercase tracking-widest truncate mb-1">
-                              {generationMode !== 'chat' ? "Visual Reference Active" : "Attachment Ready"}
+                    {attachments.length > 0 && (
+                      <div className="mx-2 mb-3 p-3 rounded-2xl bg-mirror-text/5 flex flex-col gap-3 border border-mirror-border/50 backdrop-blur-md">
+                        <div className="flex items-center justify-between">
+                          <span className="block text-[10px] font-bold text-mirror-subtext uppercase tracking-widest">
+                              "Neural Attachments"
                           </span>
-                          <div className="flex gap-2">
-                             {attachment.mimeType.startsWith('image/') && (
-                               <>
-                                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">Edit Capable</span>
-                                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-pink-500/20 text-pink-300 border border-pink-500/30">Animate Capable</span>
-                               </>
-                             )}
-                          </div>
+                          <button onClick={() => { setAttachments([]); }} className="p-1.5 hover:bg-red-500/10 rounded-full group transition-colors">
+                            <X className="w-3.5 h-3.5 text-mirror-subtext group-hover:text-red-400 transition-colors" />
+                          </button>
                         </div>
-                        <button onClick={() => { setAttachment(null); setGenerationMode('chat'); }} className="p-2 hover:bg-red-500/10 rounded-full group transition-colors">
-                          <X className="w-4 h-4 text-mirror-subtext group-hover:text-red-400 transition-colors" />
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          {attachments.map((att, idx) => (
+                            <div key={idx} className="relative group/att w-16 h-16 rounded-xl bg-black border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
+                              {att.mimeType.startsWith('image/') ? (
+                                <img src={`data:${att.mimeType};base64,${att.data}`} className="w-full h-full object-cover" />
+                              ) : (
+                                <FileText className="w-6 h-6 text-mirror-accent" />
+                              )}
+                              <button 
+                                onClick={() => setAttachments(prev => prev.filter((_, i) => i !== idx))}
+                                className="absolute top-1 right-1 p-1 bg-black/60 rounded-full opacity-0 group-hover/att:opacity-100 transition-opacity hover:bg-red-500/80"
+                              >
+                                <X className="w-2.5 h-2.5 text-white" />
+                              </button>
+                            </div>
+                          ))}
+                          {attachments.length < 5 && (
+                            <button 
+                              onClick={() => imageGenInputRef.current?.click()}
+                              className="w-16 h-16 rounded-xl border border-dashed border-white/20 flex items-center justify-center text-mirror-subtext hover:border-mirror-accent/50 hover:text-mirror-accent transition-all"
+                            >
+                              <Plus className="w-5 h-5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
                     <div className="flex items-end gap-2 pl-2">
@@ -1245,49 +1462,23 @@ const App: React.FC = () => {
 
 
                       <button 
-                        onClick={() => {
-                          const newMode = generationMode === 'image' ? 'chat' : 'image';
-                          setGenerationMode(newMode);
-                          setShowImageSettings(newMode === 'image');
-                          if (newMode === 'chat') setAttachment(null);
-                        }}
-                        className={`p-3 transition-all rounded-2xl ${generationMode === 'image' ? 'text-mirror-accent bg-mirror-accent/10' : 'text-mirror-subtext hover:text-mirror-text hover:bg-white/5'}`}
-                        title={generationMode === 'image' ? "Exit Image Mode" : "Enter Image Mode"}
+                        onClick={() => imageGenInputRef.current?.click()} 
+                        className="p-3 text-mirror-subtext hover:text-mirror-text transition-all" 
+                        title="Upload Reference Image"
                       >
-                         <ImagePlus className="w-5 h-5" />
+                        <ImagePlus className="w-5 h-5" />
                       </button>
-
-                      <button 
-                        onClick={() => {
-                          const newMode = generationMode === 'video' ? 'chat' : 'video';
-                          setGenerationMode(newMode);
-                          if (newMode === 'chat') setAttachment(null);
-                        }}
-                        className={`p-3 transition-all rounded-2xl ${generationMode === 'video' ? 'text-pink-400 bg-pink-500/10' : 'text-mirror-subtext hover:text-mirror-text hover:bg-white/5'}`}
-                        title={generationMode === 'video' ? "Exit Video Mode" : "Enter Video Mode"}
-                      >
-                         <Film className="w-5 h-5" />
-                      </button>
-
-                      {(generationMode === 'image' || generationMode === 'video') && (
-                        <button 
-                          onClick={() => imageGenInputRef.current?.click()} 
-                          className="p-3 text-mirror-subtext hover:text-mirror-text transition-all" 
-                          title="Upload Reference Image"
-                        >
-                          <Upload className="w-5 h-5" />
-                        </button>
-                      )}
                       
-                      <input type="file" ref={imageGenInputRef} className="hidden" accept="image/*" onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          const reader = new FileReader();
-                          reader.onloadend = () => {
-                              setAttachment({ mimeType: file.type, data: (reader.result as string).split(',')[1] });
-                              setGenerationMode('image');
-                          };
-                          reader.readAsDataURL(file);
+                      <input type="file" ref={imageGenInputRef} className="hidden" accept="image/*" multiple onChange={(e) => {
+                        const files = Array.from(e.target.files || []);
+                        if (files.length > 0) {
+                          files.forEach((file: File) => {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                                setAttachments(prev => [...prev, { mimeType: file.type, data: (reader.result as string).split(',')[1] }]);
+                            };
+                            reader.readAsDataURL(file);
+                          });
                         }
                       }} />
 
@@ -1295,15 +1486,22 @@ const App: React.FC = () => {
                         ref={textareaRef}
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(undefined, generationMode); }}}
-                        placeholder={generationMode === 'image' ? "Describe visual to generate..." : generationMode === 'video' ? "Describe video to generate..." : "Synchronize thought..."}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }}}
+                        placeholder="Synchronize thought... (Describe visual or video to generate)"
                         className="flex-1 bg-transparent border-none outline-none text-mirror-text py-4 min-h-[56px] resize-none text-sm placeholder:text-mirror-subtext/50 font-medium"
                         rows={1}
                       />
                       <button 
-                        onClick={() => handleSend(undefined, generationMode)}
-                        disabled={!inputValue.trim() && !attachment}
-                        className={`p-3 rounded-full hover:scale-105 active:scale-95 disabled:opacity-20 transition-all shadow-xl ${generationMode === 'image' ? 'bg-mirror-accent text-white' : generationMode === 'video' ? 'bg-pink-500 text-white' : 'bg-mirror-text text-mirror-bg'}`}
+                        onClick={() => setShowVoiceSettings(true)}
+                        className={`p-3 rounded-full hover:scale-105 active:scale-95 transition-all ${voiceSettings.enabled ? 'text-mirror-accent' : 'text-mirror-subtext/40'}`}
+                        title="Voice Settings"
+                      >
+                        <Volume2 className="w-5 h-5" />
+                      </button>
+                      <button 
+                        onClick={() => handleSend()}
+                        disabled={!inputValue.trim() && attachments.length === 0}
+                        className="p-3 rounded-full hover:scale-105 active:scale-95 disabled:opacity-20 transition-all shadow-xl bg-mirror-text text-mirror-bg"
                       >
                         {processingState !== ProcessingState.IDLE ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
                       </button>

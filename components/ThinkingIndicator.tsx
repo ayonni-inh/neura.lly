@@ -1,43 +1,49 @@
 
 import React from 'react';
-import { Zap, Brain, Radio, ImageIcon, Search, Wand2, Film } from 'lucide-react';
+import { Zap, Brain, Radio, ImageIcon, Search, Wand2, Film, AlertCircle } from 'lucide-react';
+import { ProcessingState } from '../types';
 
 interface ThinkingIndicatorProps {
-  state: 'thinking' | 'streaming' | 'generating_image' | 'editing_image' | 'generating_video' | 'idle';
+  state: ProcessingState;
 }
 
 export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({ state }) => {
-  if (state === 'idle') return null;
+  if (state === ProcessingState.IDLE) return null;
 
   const config = {
-    thinking: {
+    [ProcessingState.THINKING]: {
       icon: <Brain className="w-4 h-4 text-purple-400 animate-pulse" />,
       text: 'Architecting Solution',
       showDots: true
     },
-    streaming: {
+    [ProcessingState.STREAMING]: {
       icon: <Radio className="w-4 h-4 text-blue-400 animate-pulse" />,
       text: 'Transmitting Insight',
       showDots: true
     },
-    generating_image: {
+    [ProcessingState.IMAGEN]: {
       icon: <ImageIcon className="w-4 h-4 text-green-400 animate-bounce" />,
       text: 'Synthesizing Visualization...',
       showDots: false
     },
-    editing_image: {
+    [ProcessingState.EDITING_IMAGE]: {
       icon: <Wand2 className="w-4 h-4 text-cyan-400 animate-spin" style={{ animationDuration: '3s' }} />,
       text: 'Executing Image Transformation...',
       showDots: false
     },
-    generating_video: {
+    [ProcessingState.GENERATING_VIDEO]: {
       icon: <Film className="w-4 h-4 text-pink-400 animate-pulse" />,
       text: 'Rendering Cinematic Sequence...',
+      showDots: false
+    },
+    [ProcessingState.ERROR]: {
+      icon: <AlertCircle className="w-4 h-4 text-red-400" />,
+      text: 'Neural Link Interrupted',
       showDots: false
     }
   };
 
-  const current = config[state as keyof typeof config] || config.thinking;
+  const current = config[state as keyof typeof config] || config[ProcessingState.THINKING];
 
   return (
     <div className="flex items-center gap-3 px-4 py-2 bg-mirror-panel border border-mirror-border rounded-full w-fit shadow-lg shadow-black/20 animate-in fade-in slide-in-from-bottom-2 duration-300">
