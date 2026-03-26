@@ -108,3 +108,48 @@ export interface VoiceSettings {
   enabled: boolean;
   autoPlay: boolean;
 }
+
+export interface UserBelief {
+  id: string;
+  belief: string;
+  firstMentioned: Date;
+  lastUpdated: Date;
+  frequency: number;
+}
+
+export interface ConversationTheme {
+  id: string;
+  theme: string;
+  messages: string[];
+  intensity: number;
+  firstDetected: Date;
+  lastDetected: Date;
+}
+
+export interface GrowthMetric {
+  id: string;
+  metric: string;
+  baseline: any;
+  current: any;
+  change: number;
+  trackedSince: Date;
+  lastUpdated: Date;
+}
+
+export interface PersonalityProfile {
+  id: string;
+  communicationStyle: 'direct' | 'collaborative' | 'exploratory' | 'technical';
+  emotionalPattern: 'calm' | 'energetic' | 'anxious' | 'focused';
+  decisionStyle: 'analytical' | 'intuitive' | 'pragmatic' | 'balanced';
+  responsePreference: 'detailed' | 'concise' | 'structured' | 'narrative';
+  adaptationScore: number;
+  lastUpdated: Date;
+}
+
+export interface CognitiveState {
+  beliefs: UserBelief[];
+  themes: ConversationTheme[];
+  growthMetrics: GrowthMetric[];
+  personality: PersonalityProfile;
+  recentPatterns: string[];
+}

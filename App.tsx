@@ -1,7 +1,8 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Message, Role, ProcessingState, Attachment, AppTheme, ChatSession, Task, ImageGenerationConfig, SavedImage, UserProfile, VoiceSettings, VoiceName } from './types';
+import { Message, Role, ProcessingState, Attachment, AppTheme, ChatSession, Task, ImageGenerationConfig, SavedImage, UserProfile, VoiceSettings, VoiceName, CognitiveState } from './types';
 import { streamResponse, generateImage, editImage, generateVideo, generateSpeech, enhanceImagePrompt, upscaleImage } from './services/geminiService';
+import { createCognitiveEngine, CognitiveEngine } from './services/cognitiveEngine';
 import { db } from './services/db';
 import { MessageBubble } from './components/MessageBubble';
 import { ThinkingIndicator } from './components/ThinkingIndicator';
@@ -383,6 +384,8 @@ const App: React.FC = () => {
   });
   const [showVoiceSettings, setShowVoiceSettings] = useState(false);
 
+  const cognitiveEngineRef = useRef<CognitiveEngine | null>(null);
+
   useEffect(() => {
     localStorage.setItem('neurAlly_voice_settings', JSON.stringify(voiceSettings));
   }, [voiceSettings]);
@@ -500,15 +503,23 @@ const App: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
-        let [loadedSessions, loadedImages, loadedProfile, loadedTasks] = await Promise.all([
+        let [loadedSessions, loadedImages, loadedProfile, loadedTasks, savedCognitiveState] = await Promise.all([
           db.getSessions(),
           db.getImages(),
           db.getProfile(),
-          db.getTasks()
+          db.getTasks(),
+          db.getCognitiveState()
         ]);
 
         setUserProfile(loadedProfile);
         setTasks(loadedTasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+        
+        // Initialize or restore cognitive engine
+        if (savedCognitiveState) {
+          cognitiveEngineRef.current = createCognitiveEngine(savedCognitiveState);
+        } else {
+          cognitiveEngineRef.current = createCognitiveEngine();
+        }
 
         // Migration from LocalStorage if DB is empty
         if (loadedSessions.length === 0) {
@@ -797,13 +808,27 @@ const App: React.FC = () => {
     const botMsgId = (Date.now() + 1).toString();
 
     try {
+      // Update cognitive engine with current messages
+      if (cognitiveEngineRef.current) {
+        cognitiveEngineRef.current.updateState([...messages, newUserMsg], userProfile);
+        const cognitiveState = cognitiveEngineRef.current.getState();
+        await db.saveCognitiveState(cognitiveState);
+      }
+
       updateSessionMessages(activeId, (msgs) => [...msgs, { id: botMsgId, role: Role.MODEL, text: '', timestamp: new Date(), isStreaming: true }]);
       
       let accumulatedText = '';
       
+      // Build enhanced prompt with cognitive context
+      let enhancedPrompt = textToSubmit;
+      if (cognitiveEngineRef.current) {
+        const contextInjection = cognitiveEngineRef.current.buildContextInjection(userProfile);
+        enhancedPrompt = textToSubmit + contextInjection;
+      }
+      
       const response = await streamResponse(
         messages, // History excluding current user msg (handled in service)
-        textToSubmit,
+        enhancedPrompt,
         activeAttachments.length > 0 ? activeAttachments : null,
         (text, sources) => {
             setProcessingState(ProcessingState.STREAMING);
@@ -891,8 +916,15 @@ const App: React.FC = () => {
           ));
         }
       } else {
+        // Add IOA footer if cognitive engine is active
+        let finalText = accumulatedText;
+        if (cognitiveEngineRef.current) {
+          const ioaFooter = cognitiveEngineRef.current.generateIOA(textToSubmit, userProfile);
+          finalText = accumulatedText + ioaFooter;
+        }
+
         updateSessionMessages(activeId, msgs => msgs.map(m => 
-          m.id === botMsgId ? { ...m, isStreaming: false } : m
+          m.id === botMsgId ? { ...m, text: finalText, isStreaming: false } : m
         ));
 
         // Auto-play speech if enabled

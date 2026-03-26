@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { ChatSession, SavedImage, LogEntry, Task, UserProfile } from '../types';
+import { ChatSession, SavedImage, LogEntry, Task, UserProfile, CognitiveState } from '../types';
 import { supabase } from '../utils/supabase';
 
 interface NeurAllyDB extends DBSchema {
@@ -24,10 +24,14 @@ interface NeurAllyDB extends DBSchema {
     key: string;
     value: any;
   };
+  cognitiveState: {
+    key: string;
+    value: CognitiveState;
+  };
 }
 
 const DB_NAME = 'neurally-db';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let dbPromise: Promise<IDBPDatabase<NeurAllyDB>>;
 
@@ -50,6 +54,9 @@ export const initDB = () => {
         }
         if (!db.objectStoreNames.contains('settings')) {
           db.createObjectStore('settings');
+        }
+        if (!db.objectStoreNames.contains('cognitiveState')) {
+          db.createObjectStore('cognitiveState');
         }
       },
     });
@@ -221,5 +228,14 @@ export const db = {
       });
     }
     // We could also store this in IndexedDB if we wanted a local history
+  },
+  async getCognitiveState(): Promise<CognitiveState | null> {
+    const db = await initDB();
+    const state = await db.get('cognitiveState', 'active');
+    return state || null;
+  },
+  async saveCognitiveState(state: CognitiveState) {
+    const db = await initDB();
+    await db.put('cognitiveState', state, 'active');
   }
 };
