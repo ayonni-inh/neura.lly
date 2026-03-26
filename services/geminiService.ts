@@ -2,6 +2,7 @@
 import { GoogleGenAI, Content, Part, GenerateContentResponse, Type } from "@google/genai";
 import { MODEL_NAME, IMAGE_MODEL, SYSTEM_INSTRUCTION, FALLBACK_MODEL_NAME, FALLBACK_IMAGE_MODEL } from '../constants';
 import { Message, Role, Attachment, GroundingSource, ImageGenerationConfig, UserProfile } from '../types';
+import { getApiKey } from './apiKeyStore';
 
 // Helper for exponential backoff
 const retryWithBackoff = async <T>(
@@ -51,7 +52,7 @@ const retryWithBackoff = async <T>(
 };
 
 export const enhanceImagePrompt = async (prompt: string, isEdit: boolean = false): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
   
   const instruction = isEdit 
     ? `Rewrite the following image editing instruction to be highly precise and descriptive for an AI image editor. Keep the core intent (e.g., adding, removing, or changing elements) but ensure the description of the change is clear and detailed. Do NOT write a prompt for a completely new image, only describe the edits to be made. Return ONLY the enhanced instruction text without any conversational filler or quotes.\n\nOriginal instruction: ${prompt}`
@@ -75,7 +76,7 @@ export const generateImage = async (
   config: ImageGenerationConfig, 
   contextAttachments?: Attachment[] | null
 ): Promise<string[]> => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
   
   const styleInstruction = config.style !== 'None' ? ` in a ${config.style} style` : '';
   const fullPrompt = `${prompt}${styleInstruction}.`;
@@ -169,7 +170,7 @@ export const upscaleImage = async (
   imageUrl: string,
   prompt: string
 ): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
   const model = 'gemini-3.1-flash-image-preview'; // Use flash-image-preview for 4K support
 
   // Extract base64 and mimeType from data URL
@@ -213,7 +214,7 @@ export const editImage = async (
   prompt: string,
   images: Attachment[]
 ): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
   const model = 'gemini-2.5-flash-image';
 
   const parts: any[] = images.map(img => ({
@@ -248,7 +249,7 @@ export const generateVideo = async (
   images?: Attachment[] | null,
   aspectRatio: '16:9' | '9:16' = '16:9'
 ): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
   const model = 'veo-3.1-fast-generate-preview';
 
   const request: any = {
@@ -286,7 +287,7 @@ export const generateVideo = async (
   const response = await fetch(videoUri, {
     method: 'GET',
     headers: {
-      'x-goog-api-key': import.meta.env.VITE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || '',
+      'x-goog-api-key': getApiKey() || '',
     },
   });
 
@@ -301,7 +302,7 @@ export const generateSpeech = async (
   voiceName: string = 'Kore',
   style: string = 'Normal'
 ): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
   const model = 'gemini-2.5-flash-preview-tts';
 
   const prompt = style !== 'Normal' ? `Say ${style}: ${text}` : text;
@@ -342,7 +343,7 @@ export const streamResponse = async (
   useFastModel: boolean = false,
   userProfile?: UserProfile | null
 ): Promise<StreamResponseResult> => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
   
   // Select model based on preference
   const selectedModel = useFastModel ? 'gemini-3.1-flash-lite-preview' : MODEL_NAME;

@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Message, Role, ProcessingState, Attachment, AppTheme, ChatSession, Task, ImageGenerationConfig, SavedImage, UserProfile, VoiceSettings, VoiceName, CognitiveState } from './types';
 import { streamResponse, generateImage, editImage, generateVideo, generateSpeech, enhanceImagePrompt, upscaleImage } from './services/geminiService';
 import { createCognitiveEngine, CognitiveEngine } from './services/cognitiveEngine';
+import { getApiKey, setApiKey, hasApiKey } from './services/apiKeyStore';
 import { db } from './services/db';
 import { MessageBubble } from './components/MessageBubble';
 import { ThinkingIndicator } from './components/ThinkingIndicator';
@@ -39,8 +40,10 @@ import { motion, AnimatePresence } from 'motion/react';
 const LandingPage: React.FC<{ onLogin: (alias: string, remember: boolean, avatar: string | null) => void, isLoading: boolean }> = ({ onLogin, isLoading }) => {
   const [hasKey, setHasKey] = useState(false);
   const [showEmailForm, setShowEmailForm] = useState(false);
+  const [showApiKeyForm, setShowApiKeyForm] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [apiKey, setApiKeyInput] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [avatar, setAvatar] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -55,9 +58,9 @@ const LandingPage: React.FC<{ onLogin: (alias: string, remember: boolean, avatar
           console.error("Failed to check API key status", e);
         }
       } else {
-        // Check if API key is available from environment variables
-        const hasEnvKey = !!(import.meta.env.VITE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY);
-        setHasKey(hasEnvKey);
+        // Check if API key is available
+        const keyExists = hasApiKey();
+        setHasKey(keyExists);
       }
     };
     checkKey();
@@ -101,6 +104,14 @@ const LandingPage: React.FC<{ onLogin: (alias: string, remember: boolean, avatar
       }).catch(console.error);
     } else {
       onLogin(email.split('@')[0] || 'User', rememberMe, avatar);
+    }
+  };
+
+  const handleApiKeySubmit = (apiKey: string) => {
+    if (apiKey.trim()) {
+      setApiKey(apiKey.trim());
+      setHasKey(true);
+      onLogin('User', true, avatar);
     }
   };
 
@@ -214,6 +225,17 @@ const LandingPage: React.FC<{ onLogin: (alias: string, remember: boolean, avatar
                     <div className="h-[1px] flex-1 bg-white/10" />
                   </div>
 
+                  {!window.aistudio && (
+                    <button 
+                      onClick={() => setShowApiKeyForm(true)}
+                      disabled={isLoading}
+                      className="w-full h-14 rounded-2xl border border-white/10 bg-white/5 text-white font-semibold text-sm transition-all hover:bg-white/10 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3 disabled:opacity-50"
+                    >
+                      <CreditCard className="w-5 h-5" />
+                      Add Gemini API Key
+                    </button>
+                  )}
+
                   <button 
                     onClick={() => setShowEmailForm(true)}
                     disabled={isLoading}
@@ -294,6 +316,56 @@ const LandingPage: React.FC<{ onLogin: (alias: string, remember: boolean, avatar
                       <RefreshCw className="w-5 h-5 animate-spin mx-auto" />
                     ) : (
                       (!hasKey && window.aistudio) ? 'Connect & Sign In' : 'Sign In'
+                    )}
+                  </button>
+                </motion.form>
+              )}
+              {showApiKeyForm && (
+                <motion.form 
+                  key="api-key-form"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.3 }}
+                  onSubmit={(e) => { e.preventDefault(); handleApiKeySubmit(apiKey); }}
+                  className="space-y-4"
+                >
+                  <div className="text-left mb-6">
+                    <button 
+                      type="button" 
+                      onClick={() => setShowApiKeyForm(false)}
+                      className="text-xs text-mirror-subtext hover:text-white flex items-center gap-2 transition-colors group"
+                    >
+                      <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> 
+                      Back to options
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div className="relative group">
+                      <textarea 
+                        placeholder="Paste your Google Gemini API Key..." 
+                        required 
+                        value={apiKey}
+                        onChange={(e) => setApiKeyInput(e.target.value)}
+                        className="w-full h-24 px-5 py-4 rounded-2xl border border-white/10 outline-none bg-black/40 text-white text-sm placeholder:text-white/30 focus:border-mirror-accent/50 focus:bg-black/60 transition-all resize-none font-mono text-xs"
+                      />
+                    </div>
+                    <p className="text-[11px] text-mirror-subtext leading-relaxed">
+                      Get your API key from <a href="https://ai.google.dev" target="_blank" rel="noopener noreferrer" className="text-mirror-accent hover:underline">ai.google.dev</a>. 
+                      Your key is stored securely in your session only.
+                    </p>
+                  </div>
+                  
+                  <button 
+                    type="submit"
+                    disabled={isLoading || !apiKey.trim()}
+                    className="w-full h-14 rounded-2xl border-none cursor-pointer bg-mirror-accent text-white font-bold text-sm transition-all hover:opacity-90 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 shadow-lg shadow-mirror-accent/20 mt-4"
+                  >
+                    {isLoading ? (
+                      <RefreshCw className="w-5 h-5 animate-spin mx-auto" />
+                    ) : (
+                      'Activate Cognitive Mirror'
                     )}
                   </button>
                 </motion.form>
@@ -401,9 +473,9 @@ const App: React.FC = () => {
           console.error("Failed to check API key status", e);
         }
       } else {
-        // Check if API key is available from environment variables
-        const hasEnvKey = !!(import.meta.env.VITE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY);
-        setHasKey(hasEnvKey);
+        // Check if API key is available
+        const keyExists = hasApiKey();
+        setHasKey(keyExists);
       }
     };
     checkKey();
