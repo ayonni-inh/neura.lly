@@ -37,9 +37,11 @@ export const getApiKey = (): string => {
 export const setApiKey = (key: string) => {
   runtimeApiKey = key;
   try {
+    // Save to both sessionStorage and localStorage
     sessionStorage.setItem('neurally_api_key', key);
+    localStorage.setItem('neurally_api_key', key);
   } catch (e) {
-    console.warn('Failed to store API key in sessionStorage', e);
+    console.warn('Failed to store API key', e);
   }
 };
 
@@ -51,5 +53,6 @@ export const clearApiKey = () => {
   runtimeApiKey = null;
   try {
     sessionStorage.removeItem('neurally_api_key');
+    localStorage.removeItem('neurally_api_key');
   } catch (e) {}
 };
