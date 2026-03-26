@@ -1,5 +1,3 @@
-'use client';
-
 import React from 'react';
 import { 
   Activity, Terminal, Cpu, 
@@ -63,7 +61,7 @@ export const LogsView: React.FC = () => {
         </div>
       </div>
 
-      <div className="glass-matte rounded-[2.5rem] border border-mirror-border shadow-2xl overflow-hidden">
+      <div className="glass-matte rounded-[2.5rem] border border-mirror-border shadow-[0_12px_40px_rgba(0,0,0,0.3)] overflow-hidden">
         <div className="bg-white/5 px-8 py-4 border-b border-white/5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Terminal className="w-4 h-4 text-mirror-accent" />

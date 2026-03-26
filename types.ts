@@ -24,6 +24,7 @@ export interface ImageGenerationConfig {
   aspectRatio: '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
   imageSize: '1K' | '2K' | '4K';
   numberOfImages: number;
+  enhancePrompt?: boolean;
 }
 
 export interface SavedImage {
@@ -68,6 +69,9 @@ export interface ChatSession {
 
 export interface UserProfile {
   name: string;
+  email?: string;
+  avatar?: string;
+  bio?: string;
   role: string;
   goals: string[];
   constraints: string[];

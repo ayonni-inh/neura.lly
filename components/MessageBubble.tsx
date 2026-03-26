@@ -6,7 +6,8 @@ import {
   User, ExternalLink, Bookmark, 
   Sparkles, X, Copy, Check, RotateCcw, Download,
   FileText, Plus, Lightbulb, AlertTriangle,
-  ThumbsUp, ThumbsDown, Volume2, Play, Pause
+  ThumbsUp, ThumbsDown, Volume2, Play, Pause, Repeat, RefreshCw,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 
 interface MessageBubbleProps {
@@ -39,7 +40,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onSpeech,
   autoPlay
 }) => {
-  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
+  const [zoomedImageIndex, setZoomedImageIndex] = useState<number | null>(null);
+  const [zoomedAttachment, setZoomedAttachment] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isCaptured, setIsCaptured] = useState(false);
   const [savedImageUrls, setSavedImageUrls] = useState<Set<string>>(new Set());
@@ -150,12 +152,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
       <div className={`max-w-[85%] lg:max-w-[75%] flex flex-col gap-2 relative`} onClick={() => setShowActions(!showActions)}>
         {/* Main Content Bubble */}
-        <div className={`p-5 md:p-6 backdrop-blur-md shadow-xl transition-all duration-300 
+        <div className={`p-4 md:p-6 backdrop-blur-md transition-all duration-300 
           ${isUser 
-            ? 'bg-gradient-to-br from-mirror-accent to-blue-600 text-white rounded-[24px] rounded-tr-md border border-white/10' 
+            ? 'bg-gradient-to-br from-mirror-accent to-blue-600 text-white rounded-2xl md:rounded-[24px] rounded-tr-sm md:rounded-tr-md border border-white/10 shadow-[0_8px_32px_rgba(59,130,246,0.3)]' 
             : isError 
-              ? 'bg-red-500/5 border border-red-500/20 text-red-100 rounded-[24px] rounded-tl-md shadow-[0_0_30px_-10px_rgba(239,68,68,0.2)]'
-              : 'glass-matte text-mirror-text rounded-[24px] rounded-tl-md'
+              ? 'bg-red-500/5 border border-red-500/20 text-red-100 rounded-2xl md:rounded-[24px] rounded-tl-sm md:rounded-tl-md shadow-[0_0_30px_-10px_rgba(239,68,68,0.2)]'
+              : 'glass-matte text-mirror-text rounded-2xl md:rounded-[24px] rounded-tl-sm md:rounded-tl-md shadow-[0_8px_32px_rgba(0,0,0,0.2)]'
           } 
           ${message.isBookmarked ? 'ring-2 ring-yellow-500/30' : ''}
           cursor-pointer`}
@@ -164,7 +166,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {images.length > 0 && (
             <div className={`mb-4 grid gap-2 ${images.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
               {images.map((imgUrl, idx) => (
-                <div key={idx} className="relative rounded-2xl overflow-hidden shadow-2xl border border-mirror-border group/img cursor-zoom-in" onClick={() => setZoomedImage(imgUrl)}>
+                <div key={idx} className={`relative rounded-2xl overflow-hidden shadow-2xl border border-mirror-border group/img cursor-zoom-in ${images.length === 3 && idx === 0 ? 'col-span-2' : ''}`} onClick={() => setZoomedImageIndex(idx)}>
                   <img src={imgUrl} alt={`Visual ${idx + 1}`} className="w-full h-auto object-cover transition-transform duration-700 group-hover/img:scale-105" />
                   
                   <div className="absolute bottom-2 left-2 p-1.5 bg-black/40 backdrop-blur-md rounded-lg opacity-60 group-hover/img:opacity-100 transition-opacity">
@@ -176,7 +178,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                      <button 
                       onClick={(e) => {
                         e.stopPropagation();
-                        setZoomedImage(imgUrl);
+                        setZoomedImageIndex(idx);
                       }}
                       className="p-3 bg-white/20 hover:bg-white/40 backdrop-blur-md border border-white/30 rounded-full text-white shadow-xl transition-all hover:scale-110 active:scale-95"
                       title="Full View"
@@ -223,23 +225,47 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             </div>
           )}
 
-          {zoomedImage && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-2xl p-10 cursor-zoom-out" onClick={() => setZoomedImage(null)}>
-               <div className="relative max-w-full max-h-full" onClick={(e) => e.stopPropagation()}>
-                 <img src={zoomedImage} className="max-w-full max-h-full object-contain rounded-3xl" alt="Zoomed" />
-                 <X className="absolute top-4 right-4 w-8 h-8 text-white cursor-pointer hover:scale-110 transition-transform" onClick={() => setZoomedImage(null)} />
+          {zoomedImageIndex !== null && images[zoomedImageIndex] && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-2xl p-4 md:p-10 cursor-zoom-out" onClick={() => setZoomedImageIndex(null)}>
+               <div className="relative max-w-full max-h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+                 <img src={images[zoomedImageIndex]} className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl" alt="Zoomed" />
+                 <X className="absolute -top-12 right-0 md:top-4 md:-right-12 w-8 h-8 text-white/70 hover:text-white cursor-pointer hover:scale-110 transition-transform" onClick={() => setZoomedImageIndex(null)} />
+                 
+                 {images.length > 1 && (
+                   <>
+                     <button 
+                       onClick={(e) => { e.stopPropagation(); setZoomedImageIndex((zoomedImageIndex - 1 + images.length) % images.length); }}
+                       className="absolute left-4 md:-left-16 top-1/2 -translate-y-1/2 p-3 bg-black/50 hover:bg-black/80 text-white rounded-full backdrop-blur-md transition-all"
+                     >
+                       <ChevronLeft className="w-6 h-6" />
+                     </button>
+                     <button 
+                       onClick={(e) => { e.stopPropagation(); setZoomedImageIndex((zoomedImageIndex + 1) % images.length); }}
+                       className="absolute right-4 md:-right-16 top-1/2 -translate-y-1/2 p-3 bg-black/50 hover:bg-black/80 text-white rounded-full backdrop-blur-md transition-all"
+                     >
+                       <ChevronRight className="w-6 h-6" />
+                     </button>
+                     
+                     <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 flex gap-2">
+                       {images.map((_, i) => (
+                         <div key={i} className={`w-2 h-2 rounded-full ${i === zoomedImageIndex ? 'bg-white' : 'bg-white/30'}`} />
+                       ))}
+                     </div>
+                   </>
+                 )}
+
                  <div className="absolute bottom-4 right-4 flex gap-3">
                    <button 
-                      onClick={() => handleSaveToGallery(zoomedImage)}
-                      className="flex items-center gap-2 px-6 py-3 bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/20 rounded-2xl text-white font-bold text-xs uppercase tracking-widest transition-all"
+                      onClick={() => handleSaveToGallery(images[zoomedImageIndex])}
+                      className="flex items-center gap-2 px-4 py-2 bg-black/50 hover:bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl text-white font-bold text-xs uppercase tracking-widest transition-all"
                     >
-                       <Plus className="w-4 h-4" /> {savedImageUrls.has(zoomedImage) ? 'Saved' : 'Save Asset'}
+                       <Plus className="w-4 h-4" /> {savedImageUrls.has(images[zoomedImageIndex]) ? 'Saved' : 'Save'}
                    </button>
                    <button 
-                    onClick={() => handleDownloadImage(zoomedImage, message.timestamp)}
-                    className="flex items-center gap-2 px-6 py-3 bg-mirror-accent/80 hover:bg-mirror-accent backdrop-blur-xl border border-white/20 rounded-2xl text-white font-bold text-xs uppercase tracking-widest transition-all shadow-lg"
+                    onClick={() => handleDownloadImage(images[zoomedImageIndex], message.timestamp)}
+                    className="flex items-center gap-2 px-4 py-2 bg-mirror-accent/80 hover:bg-mirror-accent backdrop-blur-xl border border-white/20 rounded-xl text-white font-bold text-xs uppercase tracking-widest transition-all shadow-lg"
                    >
-                     <Download className="w-4 h-4" /> Save to Device
+                     <Download className="w-4 h-4" /> Download
                    </button>
                  </div>
                </div>
@@ -251,7 +277,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               {message.attachments.map((att, idx) => (
                 <div key={idx} className="rounded-xl overflow-hidden shadow-lg border border-mirror-border max-w-[200px]">
                   {att.mimeType.startsWith('image/') ? (
-                    <img src={`data:${att.mimeType};base64,${att.data}`} alt={`Ref ${idx}`} className="w-full h-auto" />
+                    <img 
+                      src={`data:${att.mimeType};base64,${att.data}`} 
+                      alt={`Ref ${idx}`} 
+                      className="w-full h-auto cursor-zoom-in hover:opacity-80 transition-opacity" 
+                      onClick={(e) => { e.stopPropagation(); setZoomedAttachment(`data:${att.mimeType};base64,${att.data}`); }}
+                    />
                   ) : (
                     <div className="flex items-center gap-2 p-2 bg-mirror-text/5 rounded-xl border border-mirror-border text-xs text-mirror-subtext font-mono">
                       <FileText className="w-4 h-4 text-mirror-accent" />
@@ -267,7 +298,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <div className="mb-4">
               {message.attachment.mimeType.startsWith('image/') ? (
                 <div className="rounded-xl overflow-hidden shadow-lg border border-mirror-border max-w-[200px]">
-                  <img src={`data:${message.attachment.mimeType};base64,${message.attachment.data}`} alt="Ref" className="w-full h-auto" />
+                  <img 
+                    src={`data:${message.attachment.mimeType};base64,${message.attachment.data}`} 
+                    alt="Ref" 
+                    className="w-full h-auto cursor-zoom-in hover:opacity-80 transition-opacity" 
+                    onClick={(e) => { e.stopPropagation(); setZoomedAttachment(`data:${message.attachment!.mimeType};base64,${message.attachment!.data}`); }}
+                  />
                 </div>
               ) : (
                 <div className="flex items-center gap-2 p-2 bg-mirror-text/5 rounded-xl border border-mirror-border text-xs text-mirror-subtext font-mono">
@@ -275,6 +311,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   {message.attachment.mimeType.split('/')[1].toUpperCase()}
                 </div>
               )}
+            </div>
+          )}
+
+          {zoomedAttachment && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-2xl p-4 md:p-10 cursor-zoom-out" onClick={() => setZoomedAttachment(null)}>
+               <div className="relative max-w-full max-h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+                 <img src={zoomedAttachment} className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl" alt="Zoomed Attachment" />
+                 <X className="absolute -top-12 right-0 md:top-4 md:-right-12 w-8 h-8 text-white/70 hover:text-white cursor-pointer hover:scale-110 transition-transform" onClick={() => setZoomedAttachment(null)} />
+               </div>
             </div>
           )}
           
@@ -313,13 +358,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             </button>
           )}
 
-          {isUser && onRerun && (
+          {onRerun && (
             <button 
               onClick={() => onRerun(message.text, message.attachments || (message.attachment ? [message.attachment] : []))} 
-              title="Rerun Prompt"
+              title={isUser ? "Rerun Prompt" : "Use as Prompt"}
               className="p-2 rounded-xl glass-gloss text-mirror-subtext hover:text-mirror-accent transition-all hover:scale-110 active:scale-95"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <Repeat className="w-3.5 h-3.5" />
             </button>
           )}
           
@@ -400,7 +445,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               title="Regenerate Response"
               className="p-2 rounded-xl glass-gloss text-mirror-subtext hover:text-mirror-accent transition-all hover:scale-110 active:scale-95"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <RefreshCw className="w-3.5 h-3.5" />
             </button>
           )}
           

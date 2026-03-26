@@ -1,5 +1,3 @@
-'use client';
-
 import React from 'react';
 import { UserProfile } from '../types';
 import { 
@@ -31,7 +29,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ profile, onUpdate }) =
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1 space-y-6">
-          <div className="glass-matte rounded-[2.5rem] p-8 border border-mirror-border shadow-2xl flex flex-col items-center text-center">
+          <div className="glass-matte rounded-[2.5rem] p-8 border border-mirror-border shadow-[0_12px_40px_rgba(0,0,0,0.3)] flex flex-col items-center text-center">
             <div className="relative mb-6">
               <div className="w-32 h-32 rounded-full bg-gradient-to-br from-mirror-accent to-mirror-accent/30 p-1">
                 <div className="w-full h-full rounded-full bg-mirror-bg flex items-center justify-center overflow-hidden">

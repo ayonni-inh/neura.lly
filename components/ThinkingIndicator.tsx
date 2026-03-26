@@ -46,7 +46,7 @@ export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({ state }) =
   const current = config[state as keyof typeof config] || config[ProcessingState.THINKING];
 
   return (
-    <div className="flex items-center gap-3 px-4 py-2 bg-mirror-panel border border-mirror-border rounded-full w-fit shadow-lg shadow-black/20 animate-in fade-in slide-in-from-bottom-2 duration-300">
+    <div className="flex items-center gap-3 px-4 py-2.5 glass-matte border border-mirror-border rounded-full w-fit shadow-[0_8px_32px_rgba(0,0,0,0.2)] animate-in fade-in slide-in-from-bottom-2 duration-300">
       {current.icon}
       <div className="flex items-center gap-1">
         <span className="text-[10px] font-mono text-mirror-subtext uppercase tracking-wider">

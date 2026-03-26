@@ -1,5 +1,3 @@
-'use client';
-
 import React from 'react';
 import { Task } from '../types';
 import { 
@@ -20,9 +18,9 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, setTasks }) => {
     if (!newTask.trim()) return;
     const task: Task = {
       id: crypto.randomUUID(),
-      title: newTask.trim(),
+      text: newTask.trim(),
       completed: false,
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(),
       priority: 'medium'
     };
     setTasks(prev => [...prev, task]);
@@ -54,7 +52,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, setTasks }) => {
         </div>
       </div>
 
-      <div className="glass-matte rounded-[2.5rem] p-8 border border-mirror-border shadow-2xl mb-8">
+      <div className="glass-matte rounded-[2.5rem] p-8 border border-mirror-border shadow-[0_12px_40px_rgba(0,0,0,0.3)] mb-8">
         <div className="flex gap-3 mb-8">
           <input 
             type="text" 
@@ -62,11 +60,11 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, setTasks }) => {
             onChange={(e) => setNewTask(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addTask()}
             placeholder="Define a new cognitive objective..."
-            className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-mirror-text placeholder:text-mirror-subtext/30 focus:outline-none focus:border-mirror-accent focus:ring-1 focus:ring-mirror-accent transition-all"
+            className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-mirror-text placeholder:text-mirror-subtext/30 focus:outline-none focus:border-mirror-accent focus:ring-1 focus:ring-mirror-accent transition-all font-medium"
           />
           <button 
             onClick={addTask}
-            className="px-8 rounded-2xl bg-mirror-accent text-white font-bold hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg shadow-mirror-accent/20"
+            className="px-8 rounded-2xl bg-mirror-accent text-white font-bold hover:scale-[1.02] active:scale-[0.98] transition-all shadow-[0_8px_24px_rgba(59,130,246,0.3)]"
           >
             <Plus className="w-5 h-5" />
           </button>
@@ -101,7 +99,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ tasks, setTasks }) => {
                   </button>
                   <div className="flex-1">
                     <p className={`text-sm font-medium ${task.completed ? 'line-through text-mirror-subtext' : 'text-mirror-text'}`}>
-                      {task.title}
+                      {task.text}
                     </p>
                     <div className="flex items-center gap-3 mt-1">
                       <span className="text-[9px] text-mirror-subtext/60 flex items-center gap-1">

@@ -50,12 +50,32 @@ const retryWithBackoff = async <T>(
   throw lastError;
 };
 
+export const enhanceImagePrompt = async (prompt: string, isEdit: boolean = false): Promise<string> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || process.env.GEMINI_API_KEY });
+  
+  const instruction = isEdit 
+    ? `Rewrite the following image editing instruction to be highly precise and descriptive for an AI image editor. Keep the core intent (e.g., adding, removing, or changing elements) but ensure the description of the change is clear and detailed. Do NOT write a prompt for a completely new image, only describe the edits to be made. Return ONLY the enhanced instruction text without any conversational filler or quotes.\n\nOriginal instruction: ${prompt}`
+    : `Rewrite the following image generation prompt to be highly detailed, descriptive, and optimized for an AI image generator. Keep the core intent but add artistic style, lighting, composition, and mood details. Return ONLY the enhanced prompt text without any conversational filler or quotes.\n\nOriginal prompt: ${prompt}`;
+
+  const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: instruction,
+    config: {
+      temperature: 0.7
+    }
+  }));
+
+  const text = response.text?.trim();
+  if (!text) throw new Error("Failed to enhance prompt.");
+  return text;
+};
+
 export const generateImage = async (
   prompt: string, 
   config: ImageGenerationConfig, 
   contextAttachments?: Attachment[] | null
 ): Promise<string[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || process.env.GEMINI_API_KEY });
   
   const styleInstruction = config.style !== 'None' ? ` in a ${config.style} style` : '';
   const fullPrompt = `${prompt}${styleInstruction}.`;
@@ -145,11 +165,55 @@ export const generateImage = async (
   }
 };
 
+export const upscaleImage = async (
+  imageUrl: string,
+  prompt: string
+): Promise<string> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || process.env.GEMINI_API_KEY });
+  const model = 'gemini-3.1-flash-image-preview'; // Use flash-image-preview for 4K support
+
+  // Extract base64 and mimeType from data URL
+  const [header, base64Data] = imageUrl.split(',');
+  const mimeType = header.split(':')[1].split(';')[0];
+
+  const parts: Part[] = [
+    {
+      inlineData: {
+        mimeType: mimeType,
+        data: base64Data
+      }
+    },
+    { text: `Upscale and enhance the resolution and details of this image. Maintain the original composition and subject exactly, but increase clarity, sharpness, and texture quality. Original prompt context: ${prompt}` }
+  ];
+
+  const response = await retryWithBackoff<GenerateContentResponse>(() => ai.models.generateContent({
+    model: model,
+    contents: { parts },
+    config: {
+      imageConfig: {
+        imageSize: '4K',
+        aspectRatio: '1:1' // Defaulting to 1:1, though ideally it should match the original
+      } as any
+    }
+  }));
+
+  const candidate = response.candidates?.[0];
+  if (!candidate) throw new Error("Image upscaling failed.");
+
+  for (const part of candidate.content?.parts || []) {
+    if (part.inlineData) {
+      return `data:image/png;base64,${part.inlineData.data}`;
+    }
+  }
+  
+  throw new Error("Image upscaling returned no image data.");
+};
+
 export const editImage = async (
   prompt: string,
   images: Attachment[]
 ): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || process.env.GEMINI_API_KEY });
   const model = 'gemini-2.5-flash-image';
 
   const parts: any[] = images.map(img => ({
@@ -184,7 +248,7 @@ export const generateVideo = async (
   images?: Attachment[] | null,
   aspectRatio: '16:9' | '9:16' = '16:9'
 ): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || process.env.GEMINI_API_KEY });
   const model = 'veo-3.1-fast-generate-preview';
 
   const request: any = {
@@ -222,7 +286,7 @@ export const generateVideo = async (
   const response = await fetch(videoUri, {
     method: 'GET',
     headers: {
-      'x-goog-api-key': process.env.API_KEY || '',
+      'x-goog-api-key': process.env.API_KEY || process.env.GEMINI_API_KEY || '',
     },
   });
 
@@ -237,7 +301,7 @@ export const generateSpeech = async (
   voiceName: string = 'Kore',
   style: string = 'Normal'
 ): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || process.env.GEMINI_API_KEY });
   const model = 'gemini-2.5-flash-preview-tts';
 
   const prompt = style !== 'Normal' ? `Say ${style}: ${text}` : text;
@@ -278,7 +342,7 @@ export const streamResponse = async (
   useFastModel: boolean = false,
   userProfile?: UserProfile | null
 ): Promise<StreamResponseResult> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || process.env.GEMINI_API_KEY });
   
   // Select model based on preference
   const selectedModel = useFastModel ? 'gemini-3.1-flash-lite-preview' : MODEL_NAME;
@@ -374,11 +438,15 @@ ADAPTATION RULES:
             functionDeclarations: [
               {
                 name: "generate_image",
-                description: "Generate a new image based on the user's prompt.",
+                description: "Generate a new image based on the user's prompt. You can infer the style, aspect ratio, number of images, and resolution from the user's request.",
                 parameters: {
                   type: Type.OBJECT,
                   properties: {
-                    prompt: { type: Type.STRING, description: "The prompt to generate the image" }
+                    prompt: { type: Type.STRING, description: "The prompt to generate the image" },
+                    style: { type: Type.STRING, description: "The aesthetic style (e.g., 'None', 'Photorealistic', 'Cyberpunk', 'Watercolor', '3D Render', 'Sketch')" },
+                    aspectRatio: { type: Type.STRING, description: "The aspect ratio (e.g., '1:1', '16:9', '9:16', '4:3', '3:4')" },
+                    numberOfImages: { type: Type.NUMBER, description: "The number of images to generate (1-4)" },
+                    imageSize: { type: Type.STRING, description: "The resolution of the image ('1K', '2K', '4K')" }
                   },
                   required: ["prompt"]
                 }
@@ -396,11 +464,12 @@ ADAPTATION RULES:
               },
               {
                 name: "generate_video",
-                description: "Generate a video based on the user's prompt.",
+                description: "Generate a video based on the user's prompt. You can infer the aspect ratio from the user's request.",
                 parameters: {
                   type: Type.OBJECT,
                   properties: {
-                    prompt: { type: Type.STRING, description: "The prompt to generate the video" }
+                    prompt: { type: Type.STRING, description: "The prompt to generate the video" },
+                    aspectRatio: { type: Type.STRING, description: "The aspect ratio ('16:9' or '9:16')" }
                   },
                   required: ["prompt"]
                 }
@@ -408,27 +477,17 @@ ADAPTATION RULES:
             ]
           }
         ],
-        // Adjust thinking budget based on model capabilities if needed
-        thinkingConfig: !useFastModel ? { thinkingBudget: 4096 } : undefined
+        // Let the model decide automatically
       },
     }));
 
     for await (const chunk of responseStream) {
       if (signal?.aborted) {
-        break;
+        throw new DOMException('Aborted', 'AbortError');
       }
 
       const c = chunk as GenerateContentResponse;
       
-      if (c.functionCalls && c.functionCalls.length > 0) {
-        const call = c.functionCalls[0];
-        functionCall = {
-          name: call.name,
-          args: call.args
-        };
-        break; // Stop streaming if a function call is made
-      }
-
       const text = c.text;
       
       const groundingChunks = c.candidates?.[0]?.groundingMetadata?.groundingChunks;
@@ -445,6 +504,15 @@ ADAPTATION RULES:
         fullText += text;
         onChunk(fullText, sources.length > 0 ? sources : undefined);
       }
+
+      if (c.functionCalls && c.functionCalls.length > 0) {
+        const call = c.functionCalls[0];
+        functionCall = {
+          name: call.name || '',
+          args: call.args
+        };
+        break; // Stop streaming if a function call is made
+      }
     }
     return { text: fullText, functionCall };
   };
@@ -452,7 +520,7 @@ ADAPTATION RULES:
   try {
     return await executeStream(selectedModel);
   } catch (error: any) {
-    if (error.name === 'AbortError') return { text: '' };
+    if (error.name === 'AbortError') throw error;
     
     // Check for high demand / service unavailable errors
     const errorString = JSON.stringify(error, Object.getOwnPropertyNames(error));
@@ -479,7 +547,7 @@ ADAPTATION RULES:
        try {
          return await executeStream(FALLBACK_MODEL_NAME);
        } catch (fallbackError: any) {
-         if (fallbackError.name === 'AbortError') return { text: '' };
+         if (fallbackError.name === 'AbortError') throw fallbackError;
          console.error("Fallback Model Error:", fallbackError);
          throw fallbackError;
        }

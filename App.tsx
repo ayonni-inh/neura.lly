@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Message, Role, ProcessingState, Attachment, AppTheme, ChatSession, Task, ImageGenerationConfig, SavedImage, UserProfile, VoiceSettings, VoiceName } from './types';
-import { streamResponse, generateImage, editImage, generateVideo, generateSpeech } from './services/geminiService';
+import { streamResponse, generateImage, editImage, generateVideo, generateSpeech, enhanceImagePrompt, upscaleImage } from './services/geminiService';
 import { db } from './services/db';
 import { MessageBubble } from './components/MessageBubble';
 import { ThinkingIndicator } from './components/ThinkingIndicator';
@@ -14,7 +14,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, FileText, 
   Sun, Moon, RefreshCw, Sparkles, MessageSquare, Plus, Play,
   CheckCircle2, ListTodo, Printer, Cpu, Volume2,
-  ImagePlus, Fingerprint, Sliders, Upload, CreditCard, LayoutGrid, Download, Ban, Activity, LogOut, Zap, Brain, AlertCircle, Check, Film
+  ImagePlus, Fingerprint, Sliders, Upload, CreditCard, LayoutGrid, Download, Ban, Activity, LogOut, Zap, Brain, AlertCircle, Check, Film, Square, ArrowUpCircle, Wand2
 } from 'lucide-react';
 
 const SESSIONS_KEY = 'neurally_sessions';
@@ -63,6 +63,10 @@ const LandingPage: React.FC<{ onLogin: (alias: string, remember: boolean, avatar
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        alert("Avatar image is too large. Maximum size is 5MB.");
+        return;
+      }
       const reader = new FileReader();
       reader.onloadend = () => {
         setAvatar(reader.result as string);
@@ -98,7 +102,7 @@ const LandingPage: React.FC<{ onLogin: (alias: string, remember: boolean, avatar
   };
 
   return (
-    <div className="flex h-screen w-full items-center justify-center p-4 relative overflow-hidden bg-mirror-bg transition-colors duration-500">
+    <div className="flex h-[100dvh] w-full items-center justify-center p-4 relative overflow-hidden bg-mirror-bg transition-colors duration-500">
       {/* Ambient Background Animation */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <motion.div 
@@ -360,6 +364,7 @@ const App: React.FC = () => {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isFastMode, setIsFastMode] = useState(true);
   const [zoomedImage, setZoomedImage] = useState<SavedImage | null>(null);
+  const [isUpscaling, setIsUpscaling] = useState(false);
   const [hasKey, setHasKey] = useState(false);
   
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(() => {
@@ -420,7 +425,8 @@ const App: React.FC = () => {
     style: 'None',
     aspectRatio: '1:1',
     imageSize: '1K',
-    numberOfImages: 1
+    numberOfImages: 1,
+    enhancePrompt: false
   });
   const [showImageSettings, setShowImageSettings] = useState(false);
 
@@ -542,7 +548,7 @@ const App: React.FC = () => {
                     for (const t of migrated) {
                         await db.saveTask(t);
                     }
-                    setTasks(migrated.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+                    setTasks(migrated.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
                 } catch (e) { console.error("Migration failed for tasks", e); }
             }
         }
@@ -694,6 +700,60 @@ const App: React.FC = () => {
     document.body.removeChild(link);
   };
 
+  const handleUpscaleImage = async (img: SavedImage) => {
+    if (isUpscaling) return;
+    setIsUpscaling(true);
+    try {
+      const upscaledUrl = await upscaleImage(img.url, img.prompt);
+      const newSavedImage: SavedImage = {
+        id: crypto.randomUUID(),
+        url: upscaledUrl,
+        prompt: `[4K Upscaled] ${img.prompt}`,
+        timestamp: new Date()
+      };
+      setSavedImages(prev => [newSavedImage, ...prev]);
+      await db.saveImage(newSavedImage);
+      setZoomedImage(newSavedImage); // Show the new upscaled image
+    } catch (error) {
+      console.error("Failed to upscale image:", error);
+      alert("Failed to upscale image. Please try again.");
+    } finally {
+      setIsUpscaling(false);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    let val = e.target.value;
+    
+    // Auto-correct specific known typos
+    const corrections: Record<string, string> = {
+      'workshet': 'worksheet',
+      'Workshet': 'Worksheet',
+      'WORKSHET': 'WORKSHEET',
+      'workshett': 'worksheet',
+      'Workshett': 'Worksheet',
+      'workshhet': 'worksheet',
+      'Workshhet': 'Worksheet',
+      'flaschard': 'flashcard',
+      'Flaschard': 'Flashcard',
+      'flaschards': 'flashcards',
+      'Flaschards': 'Flashcards',
+    };
+
+    Object.keys(corrections).forEach(typo => {
+      const regex = new RegExp(`\\b${typo}\\b`, 'g');
+      val = val.replace(regex, corrections[typo]);
+    });
+
+    setInputValue(val);
+
+    // Auto-expand textarea
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`;
+    }
+  };
+
   const handleSend = async (customText?: string, customAttachments?: Attachment[]) => {
     const textToSubmit = customText !== undefined ? customText : inputValue.trim();
     const activeAttachments = customAttachments !== undefined ? customAttachments : attachments;
@@ -715,6 +775,9 @@ const App: React.FC = () => {
     }
 
     setInputValue('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
     setAttachments([]);
     setProcessingState(ProcessingState.THINKING);
     setShowImageSettings(false);
@@ -725,10 +788,11 @@ const App: React.FC = () => {
     
     updateSessionMessages(activeId, (msgs) => [...msgs, newUserMsg]);
 
-    abortControllerRef.current = new AbortController();
+    const currentController = new AbortController();
+    abortControllerRef.current = currentController;
+    const botMsgId = (Date.now() + 1).toString();
 
     try {
-      const botMsgId = (Date.now() + 1).toString();
       updateSessionMessages(activeId, (msgs) => [...msgs, { id: botMsgId, role: Role.MODEL, text: '', timestamp: new Date(), isStreaming: true }]);
       
       let accumulatedText = '';
@@ -744,7 +808,7 @@ const App: React.FC = () => {
               m.id === botMsgId ? { ...m, text: text, sources: sources } : m
             ));
         },
-        abortControllerRef.current.signal,
+        currentController.signal,
         isFastMode,
         userProfile
       );
@@ -755,12 +819,31 @@ const App: React.FC = () => {
         
         if (name === 'generate_image') {
           setProcessingState(ProcessingState.IMAGEN);
-          const generatedImages = await generateImage(prompt, imageConfig, activeAttachments);
+          
+          const mergedConfig = {
+            ...imageConfig,
+            ...(args.style && { style: args.style }),
+            ...(args.aspectRatio && { aspectRatio: args.aspectRatio }),
+            ...(args.numberOfImages && { numberOfImages: args.numberOfImages }),
+            ...(args.imageSize && { imageSize: args.imageSize })
+          };
+          
+          let finalPrompt = prompt;
+          if (mergedConfig.enhancePrompt) {
+            try {
+              finalPrompt = await enhanceImagePrompt(prompt);
+            } catch (e) {
+              console.warn("Prompt enhancement failed, using original prompt.", e);
+            }
+          }
+          
+          const generatedImages = await generateImage(finalPrompt, mergedConfig, activeAttachments);
+          if (currentController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
           
           updateSessionMessages(activeId, msgs => msgs.map(m => 
             m.id === botMsgId ? { 
               ...m, 
-              text: response.text || `I've visualized your concept: "${prompt}"`, 
+              text: response.text ? `${response.text}\n\n*I've generated the image. What would you like to do next? You can ask me to edit it, generate variations, or create a video from it.*` : `I've generated the image. What would you like to do next? You can ask me to edit it, generate variations, or create a video from it.`, 
               generatedImageUrls: generatedImages, 
               isStreaming: false 
             } : m
@@ -768,24 +851,36 @@ const App: React.FC = () => {
         } else if (name === 'edit_image') {
           setProcessingState(ProcessingState.EDITING_IMAGE);
           const imageAttachments = activeAttachments.filter(att => att.mimeType.startsWith('image/'));
-          const editedImageUrl = await editImage(prompt, imageAttachments);
+          
+          let finalPrompt = prompt;
+          if (imageConfig.enhancePrompt) {
+            try {
+              finalPrompt = await enhanceImagePrompt(prompt, true);
+            } catch (e) {
+              console.warn("Prompt enhancement failed, using original prompt.", e);
+            }
+          }
+
+          const editedImageUrl = await editImage(finalPrompt, imageAttachments);
+          if (currentController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
           
           updateSessionMessages(activeId, msgs => msgs.map(m => 
             m.id === botMsgId ? { 
               ...m, 
-              text: response.text || `I've edited the image${imageAttachments.length > 1 ? 's' : ''} as requested: "${prompt}"`, 
+              text: response.text ? `${response.text}\n\n*I've edited the image. What would you like to do next? You can ask me to make further adjustments or generate a video from it.*` : `I've edited the image. What would you like to do next? You can ask me to make further adjustments or generate a video from it.`, 
               generatedImageUrls: [editedImageUrl], 
               isStreaming: false 
             } : m
           ));
         } else if (name === 'generate_video') {
           setProcessingState(ProcessingState.GENERATING_VIDEO);
-          const videoUrl = await generateVideo(prompt, activeAttachments);
+          const videoUrl = await generateVideo(prompt, activeAttachments, args.aspectRatio || '16:9');
+          if (currentController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
           
           updateSessionMessages(activeId, msgs => msgs.map(m => 
             m.id === botMsgId ? { 
               ...m, 
-              text: response.text || `I've generated a video for you: "${prompt}"`, 
+              text: response.text ? `${response.text}\n\n*I've generated the video. What would you like to do next? You can ask me to create another one or generate some images.*` : `I've generated the video. What would you like to do next? You can ask me to create another one or generate some images.`, 
               generatedVideoUrl: videoUrl, 
               isStreaming: false 
             } : m
@@ -804,7 +899,13 @@ const App: React.FC = () => {
 
     } catch (e: any) {
       console.error(e);
-      if (e.name !== 'AbortError') {
+      if (e.name === 'AbortError') {
+        updateSessionMessages(activeId, msgs => msgs.filter(m => m.id !== botMsgId && m.id !== newUserMsg.id));
+        setInputValue(prev => prev === '' ? textToSubmit : prev);
+        if (activeAttachments.length > 0) {
+          setAttachments(prev => prev.length === 0 ? activeAttachments : prev);
+        }
+      } else {
         let errorMsg = e.message || "Core transmission interrupted.";
         let detailedError = "";
         
@@ -860,8 +961,10 @@ const App: React.FC = () => {
         }]);
       }
     } finally {
-      setProcessingState(ProcessingState.IDLE);
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === currentController) {
+        setProcessingState(ProcessingState.IDLE);
+        abortControllerRef.current = null;
+      }
     }
   };
 
@@ -921,7 +1024,14 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen bg-mirror-bg text-mirror-text font-sans overflow-hidden transition-colors duration-500">
+    <div className="flex h-[100dvh] bg-mirror-bg text-mirror-text font-sans overflow-hidden transition-colors duration-500 relative">
+      {/* Ambient Background Glows */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+        <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-mirror-accent/10 blur-[100px] mix-blend-screen animate-pulse" style={{ animationDuration: '8s' }} />
+        <div className="absolute top-[40%] -right-[20%] w-[60%] h-[60%] rounded-full bg-purple-500/10 blur-[120px] mix-blend-screen animate-pulse" style={{ animationDuration: '12s', animationDelay: '2s' }} />
+        <div className="absolute -bottom-[20%] left-[20%] w-[40%] h-[40%] rounded-full bg-blue-500/10 blur-[100px] mix-blend-screen animate-pulse" style={{ animationDuration: '10s', animationDelay: '4s' }} />
+      </div>
+
       {!isAuthenticated ? (
         <LandingPage onLogin={handleLogin} isLoading={isAuthChecking} />
       ) : (
@@ -950,36 +1060,36 @@ const App: React.FC = () => {
 
               <button 
                 onClick={createNewSession}
-                className="mb-6 w-full flex items-center gap-3 px-3 py-3 rounded-xl bg-mirror-text text-mirror-bg font-bold text-[10px] uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all"
+                className="mb-6 w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-mirror-text text-mirror-bg font-bold text-[11px] uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg shadow-mirror-text/10"
               >
-                <Plus className="w-3.5 h-3.5" /> New Session
+                <Plus className="w-4 h-4" /> New Session
               </button>
 
               <nav className="space-y-1 mb-8">
-                <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[11px] font-medium transition-all ${view === 'chat' ? 'bg-mirror-accent text-white' : 'text-mirror-subtext hover-surface'}`}>
-                  <MessageSquare className="w-3.5 h-3.5" /> Cognitive Stream
+                <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-[12px] font-semibold transition-all ${view === 'chat' ? 'bg-mirror-accent text-white shadow-md shadow-mirror-accent/20' : 'text-mirror-subtext hover-surface'}`}>
+                  <MessageSquare className="w-4 h-4" /> Cognitive Stream
                 </button>
-                <button onClick={() => { setView('gallery'); setIsSidebarOpen(false); }} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-[11px] font-medium transition-all ${view === 'gallery' ? 'bg-mirror-accent text-white' : 'text-mirror-subtext hover-surface'}`}>
+                <button onClick={() => { setView('gallery'); setIsSidebarOpen(false); }} className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-[12px] font-semibold transition-all ${view === 'gallery' ? 'bg-mirror-accent text-white shadow-md shadow-mirror-accent/20' : 'text-mirror-subtext hover-surface'}`}>
                   <div className="flex items-center gap-3">
-                    <LayoutGrid className="w-3.5 h-3.5" /> Visual Assets
+                    <LayoutGrid className="w-4 h-4" /> Visual Assets
                   </div>
-                  <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold ${view === 'gallery' ? 'bg-white/20 text-white' : 'bg-mirror-accent/10 text-mirror-accent'}`}>
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${view === 'gallery' ? 'bg-white/20 text-white' : 'bg-mirror-accent/10 text-mirror-accent'}`}>
                     {savedImages.length}
                   </span>
                 </button>
-                <button onClick={() => { setView('tasks'); setIsSidebarOpen(false); }} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-[11px] font-medium transition-all ${view === 'tasks' ? 'bg-mirror-accent text-white' : 'text-mirror-subtext hover-surface'}`}>
+                <button onClick={() => { setView('tasks'); setIsSidebarOpen(false); }} className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl text-[12px] font-semibold transition-all ${view === 'tasks' ? 'bg-mirror-accent text-white shadow-md shadow-mirror-accent/20' : 'text-mirror-subtext hover-surface'}`}>
                   <div className="flex items-center gap-3">
-                    <ListTodo className="w-3.5 h-3.5" /> Strategic Ledger
+                    <ListTodo className="w-4 h-4" /> Strategic Ledger
                   </div>
-                  <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold ${view === 'tasks' ? 'bg-white/20 text-white' : 'bg-mirror-accent/10 text-mirror-accent'}`}>
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${view === 'tasks' ? 'bg-white/20 text-white' : 'bg-mirror-accent/10 text-mirror-accent'}`}>
                     {tasks.length}
                   </span>
                 </button>
-                <button onClick={() => { setView('logs'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[11px] font-medium transition-all ${view === 'logs' ? 'bg-mirror-accent text-white' : 'text-mirror-subtext hover-surface'}`}>
-                  <Activity className="w-3.5 h-3.5" /> System Logs
+                <button onClick={() => { setView('logs'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-[12px] font-semibold transition-all ${view === 'logs' ? 'bg-mirror-accent text-white shadow-md shadow-mirror-accent/20' : 'text-mirror-subtext hover-surface'}`}>
+                  <Activity className="w-4 h-4" /> System Logs
                 </button>
-                <button onClick={() => { setView('profile'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[11px] font-medium transition-all ${view === 'profile' ? 'bg-mirror-accent text-white' : 'text-mirror-subtext hover-surface'}`}>
-                  <User className="w-3.5 h-3.5" /> Neural Profile
+                <button onClick={() => { setView('profile'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-[12px] font-semibold transition-all ${view === 'profile' ? 'bg-mirror-accent text-white shadow-md shadow-mirror-accent/20' : 'text-mirror-subtext hover-surface'}`}>
+                  <User className="w-4 h-4" /> Neural Profile
                 </button>
               </nav>
 
@@ -1027,15 +1137,23 @@ const App: React.FC = () => {
           </aside>
 
           <div className="flex-1 flex flex-col min-w-0 relative h-full">
-            <header className="absolute top-0 left-0 right-0 h-16 md:h-20 z-30 flex items-center px-4 md:px-8 bg-gradient-to-b from-mirror-bg/95 via-mirror-bg/80 to-transparent backdrop-blur-[2px]">
-              <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2.5 md:p-3 rounded-full glass-gloss text-mirror-text shadow-lg hover:scale-110 transition-transform active:scale-95">
+            <header className="absolute top-0 left-0 right-0 h-16 md:h-20 z-30 flex items-center px-4 md:px-8 bg-mirror-bg/80 backdrop-blur-xl border-b border-mirror-border/50 shadow-sm">
+              <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2.5 md:p-3 rounded-full glass-gloss text-mirror-text shadow-lg hover:scale-110 transition-transform active:scale-95 flex items-center justify-center">
                 {isSidebarOpen ? <ChevronLeft className="w-4 h-4 md:w-5 md:h-5" /> : <ChevronRight className="w-4 h-4 md:w-5 md:h-5" />}
               </button>
               <div className="ml-4 md:ml-6 flex flex-col">
-                <h2 className="text-sm font-bold tracking-tight text-mirror-text truncate max-w-[200px] md:max-w-none">
+                <h2 className="text-sm md:text-base font-bold tracking-tight text-mirror-text truncate max-w-[200px] md:max-w-none">
                    {view === 'chat' ? (currentSession?.title || 'Synthesis') : view === 'gallery' ? 'Visual Assets' : view === 'tasks' ? 'Strategic Ledger' : view === 'profile' ? 'Neural Profile' : 'System Logs'}
                 </h2>
-                <span className="text-[9px] uppercase tracking-widest text-mirror-subtext font-mono hidden md:inline-block">neurAlly Neural Active</span>
+                <span className="text-[9px] md:text-[10px] uppercase tracking-widest text-mirror-accent font-mono hidden sm:inline-block">neurAlly Neural Active</span>
+              </div>
+              
+              <div className="ml-auto flex items-center gap-3">
+                {/* Optional: Add a quick action button or status indicator here */}
+                <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/20">
+                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                  <span className="text-[10px] font-bold text-green-500 uppercase tracking-widest">Online</span>
+                </div>
               </div>
             </header>
 
@@ -1044,37 +1162,37 @@ const App: React.FC = () => {
                 {view === 'chat' ? (
                   <>
                     {messages.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center animate-in fade-in duration-1000">
-                        <div className="relative mb-8 group">
+                      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center animate-in fade-in duration-1000 px-4">
+                        <div className="relative mb-6 md:mb-8 group">
                           <div className="absolute inset-0 bg-mirror-accent/20 blur-3xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-1000" />
-                          <Sparkles className="w-16 h-16 text-mirror-accent/50 relative z-10" />
+                          <Sparkles className="w-12 h-12 md:w-16 md:h-16 text-mirror-accent/50 relative z-10" />
                         </div>
                         
-                        <h1 className="text-5xl font-bold mb-4 tracking-tighter bg-gradient-to-br from-white via-mirror-text to-mirror-subtext bg-clip-text text-transparent">
+                        <h1 className="text-3xl md:text-5xl font-bold mb-3 md:mb-4 tracking-tighter bg-gradient-to-br from-white via-mirror-text to-mirror-subtext bg-clip-text text-transparent">
                           Hi <span className="text-mirror-accent">{userAlias}</span>
                         </h1>
-                        <p className="text-xl text-mirror-subtext font-medium mb-12 max-w-lg leading-relaxed">
-                          I am synced and ready to act as your cognitive mirror. <br/> Where shall we direct our focus?
+                        <p className="text-base md:text-xl text-mirror-subtext font-medium mb-8 md:mb-12 max-w-lg leading-relaxed px-4">
+                          I am synced and ready to act as your cognitive mirror. <br className="hidden md:block"/> Where shall we direct our focus?
                         </p>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl px-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4 w-full max-w-2xl">
                           {[
-                            { icon: <ListTodo className="w-5 h-5" />, label: "Strategic Planning", prompt: "Help me draft a strategic roadmap for..." },
-                            { icon: <ImagePlus className="w-5 h-5" />, label: "Visual Synthesis", prompt: "Generate a visualization of..." },
-                            { icon: <Cpu className="w-5 h-5" />, label: "Technical Analysis", prompt: "Analyze the technical architecture of..." },
-                            { icon: <Brain className="w-5 h-5" />, label: "Creative Ideation", prompt: "Brainstorm innovative concepts for..." }
+                            { icon: <ListTodo className="w-4 h-4 md:w-5 md:h-5" />, label: "Strategic Planning", prompt: "Help me draft a strategic roadmap for..." },
+                            { icon: <ImagePlus className="w-4 h-4 md:w-5 md:h-5" />, label: "Visual Synthesis", prompt: "Generate a visualization of..." },
+                            { icon: <Cpu className="w-4 h-4 md:w-5 md:h-5" />, label: "Technical Analysis", prompt: "Analyze the technical architecture of..." },
+                            { icon: <Brain className="w-4 h-4 md:w-5 md:h-5" />, label: "Creative Ideation", prompt: "Brainstorm innovative concepts for..." }
                           ].map((item, i) => (
                             <button
                               key={i}
                               onClick={() => setInputValue(item.prompt)}
-                              className="group flex items-center gap-4 p-4 rounded-2xl bg-white/5 border border-white/5 hover:bg-white/10 hover:border-mirror-accent/30 hover:shadow-lg hover:shadow-mirror-accent/5 transition-all text-left"
+                              className="group flex items-center gap-3 md:gap-4 p-3 md:p-4 rounded-2xl glass-matte border border-white/5 hover:bg-white/10 hover:border-mirror-accent/30 hover:shadow-[0_8px_32px_rgba(59,130,246,0.15)] transition-all text-left"
                             >
-                              <div className="p-3 rounded-xl bg-black/20 text-mirror-accent group-hover:scale-110 transition-transform">
+                              <div className="p-2 md:p-3 rounded-xl bg-black/20 text-mirror-accent group-hover:scale-110 transition-transform shadow-inner">
                                 {item.icon}
                               </div>
                               <div>
-                                <span className="block text-sm font-bold text-mirror-text group-hover:text-white transition-colors">{item.label}</span>
-                                <span className="text-xs text-mirror-subtext group-hover:text-mirror-subtext/80">Initialize sequence &rarr;</span>
+                                <span className="block text-xs md:text-sm font-bold text-mirror-text group-hover:text-white transition-colors">{item.label}</span>
+                                <span className="text-[10px] md:text-xs text-mirror-subtext group-hover:text-mirror-subtext/80">Initialize sequence &rarr;</span>
                               </div>
                             </button>
                           ))}
@@ -1134,7 +1252,7 @@ const App: React.FC = () => {
                       ) : (
                         savedImages.map(img => (
                           <div key={img.id} className="relative group rounded-2xl overflow-hidden glass-matte border border-mirror-border aspect-square cursor-pointer" onClick={() => setZoomedImage(img)}>
-                             <img src={img.url} alt="Saved Asset" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
+                             <img src={img.url} alt="Saved Asset" loading="lazy" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
                              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-end">
                                 <p className="text-[10px] text-white/90 line-clamp-2 font-medium mb-2">{img.prompt}</p>
                                 <div className="flex items-center justify-between gap-2">
@@ -1168,7 +1286,7 @@ const App: React.FC = () => {
                 ) : view === 'tasks' ? (
                   <TasksView tasks={tasks} setTasks={setTasks} />
                 ) : view === 'profile' ? (
-                  <ProfileView profile={userProfile} onUpdate={setUserProfile} />
+                  userProfile && <ProfileView profile={userProfile} onUpdate={setUserProfile} />
                 ) : (
                   <LogsView />
                 )}
@@ -1190,6 +1308,15 @@ const App: React.FC = () => {
                         <p className="text-[10px] text-mirror-subtext mt-1">{new Date(zoomedImage.timestamp).toLocaleString()}</p>
                       </div>
                       <div className="flex items-center gap-2">
+                         <button 
+                          onClick={() => handleUpscaleImage(zoomedImage)}
+                          disabled={isUpscaling}
+                          className="p-3 bg-white/5 hover:bg-white/10 rounded-xl transition-all text-white disabled:opacity-50 flex items-center gap-2"
+                          title="Upscale to 4K"
+                         >
+                           {isUpscaling ? <RefreshCw className="w-5 h-5 animate-spin" /> : <ArrowUpCircle className="w-5 h-5" />}
+                           <span className="text-xs font-bold hidden sm:inline">Upscale</span>
+                         </button>
                          <button 
                           onClick={() => handleDownloadImage(zoomedImage.url, `neurAlly-asset-${zoomedImage.id}.png`)}
                           className="p-3 bg-white/5 hover:bg-white/10 rounded-xl transition-all text-white"
@@ -1218,7 +1345,7 @@ const App: React.FC = () => {
                     initial={{ opacity: 0, scale: 0.9, y: 20 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                    className="w-full max-w-md glass-card border border-white/10 rounded-[32px] p-8 overflow-hidden relative shadow-2xl"
+                    className="w-full max-w-md glass-matte border border-white/10 rounded-[32px] p-8 overflow-hidden relative shadow-[0_12px_40px_rgba(0,0,0,0.3)]"
                     onClick={e => e.stopPropagation()}
                   >
                     <div className="flex items-center justify-between mb-8">
@@ -1327,12 +1454,12 @@ const App: React.FC = () => {
             )}
 
             {view === 'chat' && (
-              <div className="px-4 pb-10 pt-2 bg-gradient-to-t from-mirror-bg via-mirror-bg/90 to-transparent z-20">
+              <div className="px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-10 pt-2 bg-gradient-to-t from-mirror-bg via-mirror-bg/90 to-transparent z-20">
                 <div className="max-w-3xl mx-auto">
                    {/* Image Settings Panel */}
                   {showImageSettings && (
                     <div className="absolute bottom-full left-0 right-0 mb-4 mx-4 animate-in fade-in slide-in-from-bottom-4 zoom-in-95 duration-300 z-50">
-                      <div className="max-w-md mx-auto glass-dock rounded-3xl p-6 border border-mirror-border shadow-2xl backdrop-blur-xl bg-black/80">
+                      <div className="max-w-md mx-auto glass-matte rounded-3xl p-6 border border-mirror-border shadow-[0_12px_40px_rgba(0,0,0,0.3)] backdrop-blur-xl bg-black/80">
                          <div className="flex items-center justify-between mb-6">
                            <h3 className="text-xs font-bold uppercase tracking-widest text-mirror-text flex items-center gap-2">
                              <Sliders className="w-4 h-4 text-mirror-accent" /> Visualization Matrix
@@ -1407,12 +1534,28 @@ const App: React.FC = () => {
                              </div>
                            </div>
 
+                           {/* AI Prompt Enhancement */}
+                           <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+                             <div>
+                               <p className="text-xs font-bold text-mirror-text flex items-center gap-2">
+                                 <Wand2 className="w-3.5 h-3.5 text-mirror-accent" /> AI Prompt Enhancement
+                               </p>
+                               <p className="text-[10px] text-mirror-subtext mt-0.5">Automatically optimize prompts for better results</p>
+                             </div>
+                             <button 
+                               onClick={() => setImageConfig({...imageConfig, enhancePrompt: !imageConfig.enhancePrompt})}
+                               className={`w-10 h-5 rounded-full transition-all relative ${imageConfig.enhancePrompt ? 'bg-mirror-accent' : 'bg-white/10'}`}
+                             >
+                               <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${imageConfig.enhancePrompt ? 'left-6' : 'left-1'}`} />
+                             </button>
+                           </div>
+
                          </div>
                       </div>
                     </div>
                   )}
 
-                  <div className="relative glass-dock rounded-[2.5rem] p-3 shadow-2xl border border-white/5">
+                  <div className="relative glass-dock rounded-3xl md:rounded-[2.5rem] p-2 md:p-3 shadow-[0_8px_32px_rgba(0,0,0,0.4)] border border-white/10 backdrop-blur-3xl transition-all duration-300 focus-within:shadow-[0_8px_32px_rgba(59,130,246,0.2)] focus-within:border-mirror-accent/30">
                     {attachments.length > 0 && (
                       <div className="mx-2 mb-3 p-3 rounded-2xl bg-mirror-text/5 flex flex-col gap-3 border border-mirror-border/50 backdrop-blur-md">
                         <div className="flex items-center justify-between">
@@ -1425,11 +1568,11 @@ const App: React.FC = () => {
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {attachments.map((att, idx) => (
-                            <div key={idx} className="relative group/att w-16 h-16 rounded-xl bg-black border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
+                            <div key={idx} className="relative group/att w-14 h-14 md:w-16 md:h-16 rounded-xl bg-black border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
                               {att.mimeType.startsWith('image/') ? (
                                 <img src={`data:${att.mimeType};base64,${att.data}`} className="w-full h-full object-cover" />
                               ) : (
-                                <FileText className="w-6 h-6 text-mirror-accent" />
+                                <FileText className="w-5 h-5 md:w-6 md:h-6 text-mirror-accent" />
                               )}
                               <button 
                                 onClick={() => setAttachments(prev => prev.filter((_, i) => i !== idx))}
@@ -1442,69 +1585,97 @@ const App: React.FC = () => {
                           {attachments.length < 5 && (
                             <button 
                               onClick={() => imageGenInputRef.current?.click()}
-                              className="w-16 h-16 rounded-xl border border-dashed border-white/20 flex items-center justify-center text-mirror-subtext hover:border-mirror-accent/50 hover:text-mirror-accent transition-all"
+                              className="w-14 h-14 md:w-16 md:h-16 rounded-xl border border-dashed border-white/20 flex items-center justify-center text-mirror-subtext hover:border-mirror-accent/50 hover:text-mirror-accent transition-all"
                             >
-                              <Plus className="w-5 h-5" />
+                              <Plus className="w-4 h-4 md:w-5 md:h-5" />
                             </button>
                           )}
                         </div>
                       </div>
                     )}
-                    <div className="flex items-end gap-2 pl-2">
+                    <div className="flex items-end gap-1 md:gap-2 pl-1 md:pl-2">
                       <button 
                         onClick={() => setIsFastMode(!isFastMode)}
-                        className={`p-3 transition-all rounded-2xl ${isFastMode ? 'text-yellow-400 bg-yellow-400/10' : 'text-mirror-subtext hover:text-mirror-text hover:bg-white/5'}`}
+                        className={`p-2 md:p-3 transition-all rounded-xl md:rounded-2xl ${isFastMode ? 'text-yellow-400 bg-yellow-400/10' : 'text-mirror-subtext hover:text-mirror-text hover:bg-white/5'}`}
                         title={isFastMode ? "Fast Mode Active (Flash Lite)" : "Deep Reasoning Mode (Pro)"}
                       >
-                         <Zap className={`w-5 h-5 ${isFastMode ? 'fill-current' : ''}`} />
+                         <Zap className={`w-4 h-4 md:w-5 md:h-5 ${isFastMode ? 'fill-current' : ''}`} />
                       </button>
-
-
 
                       <button 
                         onClick={() => imageGenInputRef.current?.click()} 
-                        className="p-3 text-mirror-subtext hover:text-mirror-text transition-all" 
+                        className="p-2 md:p-3 text-mirror-subtext hover:text-mirror-text transition-all" 
                         title="Upload Reference Image"
                       >
-                        <ImagePlus className="w-5 h-5" />
+                        <ImagePlus className="w-4 h-4 md:w-5 md:h-5" />
                       </button>
                       
                       <input type="file" ref={imageGenInputRef} className="hidden" accept="image/*" multiple onChange={(e) => {
                         const files = Array.from(e.target.files || []);
                         if (files.length > 0) {
                           files.forEach((file: File) => {
+                            if (file.size > 10 * 1024 * 1024) {
+                              alert(`File ${file.name} is too large. Maximum size is 10MB.`);
+                              return;
+                            }
                             const reader = new FileReader();
                             reader.onloadend = () => {
-                                setAttachments(prev => [...prev, { mimeType: file.type, data: (reader.result as string).split(',')[1] }]);
+                                setAttachments(prev => [...prev, { 
+                                  id: crypto.randomUUID(),
+                                  mimeType: file.type, 
+                                  data: (reader.result as string).split(',')[1],
+                                  url: reader.result as string,
+                                  type: file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'file'
+                                }]);
                             };
                             reader.readAsDataURL(file);
                           });
                         }
+                        // Reset input so the same file can be selected again if needed
+                        if (e.target) e.target.value = '';
                       }} />
 
                       <textarea 
                         ref={textareaRef}
                         value={inputValue}
-                        onChange={(e) => setInputValue(e.target.value)}
+                        onChange={handleInputChange}
                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }}}
-                        placeholder="Synchronize thought... (Describe visual or video to generate)"
-                        className="flex-1 bg-transparent border-none outline-none text-mirror-text py-4 min-h-[56px] resize-none text-sm placeholder:text-mirror-subtext/50 font-medium"
+                        placeholder="Synchronize thought..."
+                        className="flex-1 bg-transparent border-none outline-none text-mirror-text py-3 md:py-4 px-2 min-h-[48px] md:min-h-[56px] resize-none text-sm placeholder:text-mirror-subtext/50 font-medium no-scrollbar"
                         rows={1}
+                        spellCheck={true}
                       />
                       <button 
-                        onClick={() => setShowVoiceSettings(true)}
-                        className={`p-3 rounded-full hover:scale-105 active:scale-95 transition-all ${voiceSettings.enabled ? 'text-mirror-accent' : 'text-mirror-subtext/40'}`}
-                        title="Voice Settings"
+                        onClick={() => setShowImageSettings(!showImageSettings)}
+                        className={`p-2 md:p-3 rounded-full hover:scale-105 active:scale-95 transition-all ${showImageSettings ? 'text-mirror-accent bg-mirror-accent/10' : 'text-mirror-subtext/40 hover:text-mirror-text hover:bg-white/5'}`}
+                        title="Image Settings"
                       >
-                        <Volume2 className="w-5 h-5" />
+                        <Sliders className="w-4 h-4 md:w-5 md:h-5" />
                       </button>
                       <button 
-                        onClick={() => handleSend()}
-                        disabled={!inputValue.trim() && attachments.length === 0}
-                        className="p-3 rounded-full hover:scale-105 active:scale-95 disabled:opacity-20 transition-all shadow-xl bg-mirror-text text-mirror-bg"
+                        onClick={() => setShowVoiceSettings(true)}
+                        className={`p-2 md:p-3 rounded-full hover:scale-105 active:scale-95 transition-all ${voiceSettings.enabled ? 'text-mirror-accent' : 'text-mirror-subtext/40 hover:text-mirror-text hover:bg-white/5'}`}
+                        title="Voice Settings"
                       >
-                        {processingState !== ProcessingState.IDLE ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                        <Volume2 className="w-4 h-4 md:w-5 md:h-5" />
                       </button>
+                      {processingState !== ProcessingState.IDLE ? (
+                        <button 
+                          onClick={handleStopGeneration}
+                          className="p-2 md:p-3 rounded-full hover:scale-105 active:scale-95 transition-all shadow-xl bg-red-500 text-white"
+                          title="Stop Generation"
+                        >
+                          <Square className="w-4 h-4 md:w-5 md:h-5 fill-current" />
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => handleSend()}
+                          disabled={!inputValue.trim() && attachments.length === 0}
+                          className="p-2 md:p-3 rounded-full hover:scale-105 active:scale-95 disabled:opacity-20 transition-all shadow-xl bg-mirror-text text-mirror-bg"
+                        >
+                          <Send className="w-4 h-4 md:w-5 md:h-5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
