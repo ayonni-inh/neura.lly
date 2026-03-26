@@ -7,7 +7,7 @@ import {
   Sparkles, X, Copy, Check, RotateCcw, Download,
   FileText, Plus, Lightbulb, AlertTriangle,
   ThumbsUp, ThumbsDown, Volume2, Play, Pause, Repeat, RefreshCw,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, Share2, Maximize2
 } from 'lucide-react';
 
 interface MessageBubbleProps {
@@ -51,6 +51,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [sharedImageUrl, setSharedImageUrl] = useState<string | null>(null);
   const audioRef = React.useRef<HTMLAudioElement>(null);
   const isUser = message.role === Role.USER;
 
@@ -149,6 +150,44 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
   };
 
+  const handleShareImage = async (imageUrl: string) => {
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: 'neurAlly Generated Image',
+          text: 'Check out this AI-generated image from neurAlly',
+          url: imageUrl
+        });
+      } else {
+        // Fallback: copy to clipboard
+        await navigator.clipboard.writeText(imageUrl);
+        setSharedImageUrl(imageUrl);
+        setTimeout(() => setSharedImageUrl(null), 2000);
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        // Copy to clipboard as fallback
+        try {
+          await navigator.clipboard.writeText(imageUrl);
+          setSharedImageUrl(imageUrl);
+          setTimeout(() => setSharedImageUrl(null), 2000);
+        } catch (e) {
+          console.error('Failed to share or copy image', e);
+        }
+      }
+    }
+  };
+
+  const handleCopyImageUrl = async (imageUrl: string) => {
+    try {
+      await navigator.clipboard.writeText(imageUrl);
+      setSharedImageUrl(imageUrl);
+      setTimeout(() => setSharedImageUrl(null), 2000);
+    } catch (e) {
+      console.error('Failed to copy URL', e);
+    }
+  };
+
   const handleCaptureAction = () => {
     if (footerData.action && onActionClick) {
       onActionClick(footerData.action);
@@ -200,9 +239,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         setZoomedImageIndex(idx);
                       }}
                       className="p-3 bg-white/20 hover:bg-white/40 backdrop-blur-md border border-white/30 rounded-full text-white shadow-xl transition-all hover:scale-110 active:scale-95"
-                      title="Full View"
+                      title="View Full Screen"
                     >
-                      <Plus className="w-6 h-6 rotate-45" />
+                      <Maximize2 className="w-6 h-6" />
                     </button>
                     <button 
                       onClick={(e) => {
@@ -210,9 +249,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         handleDownloadImage(imgUrl, message.timestamp);
                       }}
                       className="p-3 bg-mirror-accent/80 hover:bg-mirror-accent backdrop-blur-md border border-white/30 rounded-full text-white shadow-xl transition-all hover:scale-110 active:scale-95"
-                      title="Save to Device"
+                      title="Download to Device"
                     >
                       <Download className="w-6 h-6" />
+                    </button>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleShareImage(imgUrl);
+                      }}
+                      className={`p-3 backdrop-blur-md border border-white/30 rounded-full text-white shadow-xl transition-all hover:scale-110 active:scale-95 ${
+                        sharedImageUrl === imgUrl ? 'bg-blue-500/80' : 'bg-blue-500/60 hover:bg-blue-500/80'
+                      }`}
+                      title="Share or Copy Image"
+                    >
+                      <Share2 className="w-6 h-6" />
                     </button>
                   </div>
 
@@ -289,20 +340,37 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                    </>
                  )}
 
-                 <div className="absolute bottom-4 right-4 flex gap-3">
-                   <button 
-                      onClick={() => handleSaveToGallery(images[zoomedImageIndex])}
-                      className="flex items-center gap-2 px-4 py-2 bg-black/50 hover:bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl text-white font-bold text-xs uppercase tracking-widest transition-all"
-                    >
-                       <Plus className="w-4 h-4" /> {savedImageUrls.has(images[zoomedImageIndex]) ? 'Saved' : 'Save'}
-                   </button>
-                   <button 
+                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 md:gap-3 flex-wrap justify-center max-w-[90%]">
+                  <button 
+                    onClick={() => handleSaveToGallery(images[zoomedImageIndex])}
+                    className={`flex items-center gap-2 px-4 py-2.5 backdrop-blur-xl border rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${
+                      savedImageUrls.has(images[zoomedImageIndex])
+                        ? 'bg-green-500/40 border-green-400/50 text-white'
+                        : 'bg-black/50 hover:bg-black/80 border-white/10 text-white'
+                    }`}
+                    title="Save to Visual Assets"
+                  >
+                    <Plus className="w-4 h-4" /> {savedImageUrls.has(images[zoomedImageIndex]) ? 'Saved' : 'Save'}
+                  </button>
+                  <button 
                     onClick={() => handleDownloadImage(images[zoomedImageIndex], message.timestamp)}
-                    className="flex items-center gap-2 px-4 py-2 bg-mirror-accent/80 hover:bg-mirror-accent backdrop-blur-xl border border-white/20 rounded-xl text-white font-bold text-xs uppercase tracking-widest transition-all shadow-lg"
-                   >
-                     <Download className="w-4 h-4" /> Download
-                   </button>
-                 </div>
+                    className="flex items-center gap-2 px-4 py-2.5 bg-mirror-accent/80 hover:bg-mirror-accent backdrop-blur-xl border border-white/30 rounded-lg text-white font-bold text-xs uppercase tracking-widest transition-all shadow-lg"
+                    title="Download to Device"
+                  >
+                    <Download className="w-4 h-4" /> Download
+                  </button>
+                  <button 
+                    onClick={() => handleShareImage(images[zoomedImageIndex])}
+                    className={`flex items-center gap-2 px-4 py-2.5 backdrop-blur-xl border rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${
+                      sharedImageUrl === images[zoomedImageIndex]
+                        ? 'bg-blue-500/40 border-blue-400/50 text-white'
+                        : 'bg-black/50 hover:bg-black/80 border-white/10 text-white'
+                    }`}
+                    title="Share or Copy Image URL"
+                  >
+                    <Share2 className="w-4 h-4" /> {sharedImageUrl === images[zoomedImageIndex] ? 'Copied' : 'Share'}
+                  </button>
+                </div>
                </div>
             </div>
           )}
