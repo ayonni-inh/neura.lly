@@ -54,7 +54,9 @@ const LandingPage: React.FC<{ onLogin: (alias: string, remember: boolean, avatar
           console.error("Failed to check API key status", e);
         }
       } else {
-        setHasKey(true);
+        // Check if API key is available from environment variables
+        const hasEnvKey = !!(import.meta.env.VITE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY);
+        setHasKey(hasEnvKey);
       }
     };
     checkKey();
@@ -396,7 +398,9 @@ const App: React.FC = () => {
           console.error("Failed to check API key status", e);
         }
       } else {
-        setHasKey(true);
+        // Check if API key is available from environment variables
+        const hasEnvKey = !!(import.meta.env.VITE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY);
+        setHasKey(hasEnvKey);
       }
     };
     checkKey();
