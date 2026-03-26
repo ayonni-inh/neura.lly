@@ -759,6 +759,22 @@ const App: React.FC = () => {
     });
   };
 
+  const handleSaveVideo = (url: string) => {
+    // Automatically download video to device storage/gallery
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `neurAlly-video-${new Date().getTime()}.mp4`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    db.addLog({
+      timestamp: new Date(),
+      level: 'info',
+      message: 'Video downloaded to device'
+    });
+  };
+
   const handleDeleteImage = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (window.confirm("Delete this visual asset?")) {
@@ -1316,6 +1332,7 @@ const App: React.FC = () => {
                             onActionClick={(text) => addTask(text)}
                             onToggleBookmark={(id) => updateSessionMessages(currentSessionId!, msgs => msgs.map(m => m.id === id ? { ...m, isBookmarked: !m.isBookmarked } : m))}
                             onSaveImage={(url) => handleSaveImage(url, msg.text)}
+                            onSaveVideo={handleSaveVideo}
                             onFeedback={(id, type) => updateSessionMessages(currentSessionId!, msgs => msgs.map(m => m.id === id ? { ...m, feedback: type } : m))}
                             onRegenerate={handleRegenerate}
                             onRerun={(text, atts) => { setInputValue(text); if (atts) setAttachments(atts); }}

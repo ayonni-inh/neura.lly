@@ -21,6 +21,7 @@ interface MessageBubbleProps {
   onRegenerate?: (id: string) => void;
   onContinue?: (id: string) => void;
   onSaveImage?: (url: string) => void;
+  onSaveVideo?: (url: string) => void;
   onStop?: () => void;
   onSpeech?: (text: string, id: string) => void;
   autoPlay?: boolean;
@@ -36,6 +37,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onRerun,
   onRegenerate,
   onSaveImage,
+  onSaveVideo,
   onStop,
   onSpeech,
   autoPlay
@@ -45,6 +47,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [copied, setCopied] = useState(false);
   const [isCaptured, setIsCaptured] = useState(false);
   const [savedImageUrls, setSavedImageUrls] = useState<Set<string>>(new Set());
+  const [savedVideoUrl, setSavedVideoUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -127,6 +130,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       setTimeout(() => {
         // Optional: clear status if we want to allow re-saving or just keep it checked
       }, 2000); 
+    }
+  };
+
+  const handleDownloadVideo = (videoUrl: string, timestamp: Date) => {
+    const link = document.createElement('a');
+    link.href = videoUrl;
+    link.download = `neurAlly-video-${timestamp.getTime()}.mp4`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleSaveVideoToGallery = (url: string) => {
+    if (onSaveVideo) {
+      onSaveVideo(url);
+      setSavedVideoUrl(url);
     }
   };
 
@@ -215,13 +234,29 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           )}
 
           {message.generatedVideoUrl && (
-            <div className="mb-4 rounded-2xl overflow-hidden shadow-2xl border border-mirror-border">
+            <div className="mb-4 rounded-2xl overflow-hidden shadow-2xl border border-mirror-border group relative">
               <video 
                 src={message.generatedVideoUrl} 
                 controls 
                 className="w-full h-auto"
                 poster={(message.attachments?.[0] || message.attachment)?.mimeType.startsWith('image/') ? `data:${(message.attachments?.[0] || message.attachment)!.mimeType};base64,${(message.attachments?.[0] || message.attachment)!.data}` : undefined}
               />
+              <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                <button 
+                  onClick={() => handleSaveVideoToGallery(message.generatedVideoUrl!)}
+                  className={`p-3 backdrop-blur-md border border-white/20 rounded-full text-white shadow-lg transition-all hover:scale-110 active:scale-95 ${savedVideoUrl === message.generatedVideoUrl ? 'bg-green-500/60' : 'bg-black/40 hover:bg-black/60'}`}
+                  title={savedVideoUrl === message.generatedVideoUrl ? "Saved to Gallery" : "Save to Visual Assets"}
+                >
+                  {savedVideoUrl === message.generatedVideoUrl ? <Check className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
+                </button>
+                <button 
+                  onClick={() => handleDownloadVideo(message.generatedVideoUrl!, message.timestamp)}
+                  className="p-3 bg-mirror-accent/80 hover:bg-mirror-accent backdrop-blur-md border border-white/30 rounded-full text-white shadow-xl transition-all hover:scale-110 active:scale-95"
+                  title="Download Video"
+                >
+                  <Download className="w-5 h-5" />
+                </button>
+              </div>
             </div>
           )}
 
