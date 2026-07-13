@@ -37,12 +37,32 @@ export class ErrorBoundary extends Component<Props, State> {
             <p className="text-mirror-subtext mb-8 text-sm">
               The neural interface encountered an unexpected error. Our cognitive systems have logged the anomaly.
             </p>
-            <button
-              onClick={() => window.location.reload()}
-              className="w-full py-3 px-4 bg-mirror-accent hover:bg-mirror-accent/80 text-white rounded-xl font-bold transition-colors"
-            >
-              Reinitialize Interface
-            </button>
+            <div className="space-y-3">
+              <button
+                onClick={() => window.location.reload()}
+                className="w-full py-3 px-4 bg-mirror-accent hover:bg-mirror-accent/80 text-white rounded-xl font-bold transition-colors"
+              >
+                Reinitialize Interface
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    localStorage.clear();
+                    const databases = await window.indexedDB.databases();
+                    databases.forEach(db => {
+                      if (db.name) window.indexedDB.deleteDatabase(db.name);
+                    });
+                    window.location.reload();
+                  } catch (e) {
+                    console.error('Failed to clear storage:', e);
+                    window.location.reload();
+                  }
+                }}
+                className="w-full py-3 px-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl font-bold transition-colors text-xs uppercase tracking-widest border border-red-500/20"
+              >
+                Reset & Clear Cache
+              </button>
+            </div>
             {this.state.error && (
               <div className="mt-6 p-4 bg-black/40 rounded-xl text-left overflow-auto max-h-32">
                 <p className="text-xs text-red-300 font-mono break-all">

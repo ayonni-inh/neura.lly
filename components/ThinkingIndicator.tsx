@@ -8,12 +8,24 @@ interface ThinkingIndicatorProps {
 }
 
 export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({ state }) => {
-  // Hide thinking and streaming bubbles - only show active task execution indicators
-  if (state === ProcessingState.IDLE || state === ProcessingState.THINKING || state === ProcessingState.STREAMING) {
-    return null;
-  }
+  if (state === ProcessingState.IDLE) return null;
 
   const config = {
+    [ProcessingState.DETECTING_INTENT]: {
+      icon: <Zap className="w-4 h-4 text-yellow-400 animate-pulse" />,
+      text: 'Analyzing Intent',
+      showDots: true
+    },
+    [ProcessingState.THINKING]: {
+      icon: <Brain className="w-4 h-4 text-purple-400 animate-pulse" />,
+      text: 'Architecting Solution',
+      showDots: true
+    },
+    [ProcessingState.STREAMING]: {
+      icon: <Radio className="w-4 h-4 text-blue-400 animate-pulse" />,
+      text: 'Transmitting Insight',
+      showDots: true
+    },
     [ProcessingState.IMAGEN]: {
       icon: <ImageIcon className="w-4 h-4 text-green-400 animate-bounce" />,
       text: 'Synthesizing Visualization...',
@@ -36,7 +48,7 @@ export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({ state }) =
     }
   };
 
-  const current = config[state as keyof typeof config] || config[ProcessingState.ERROR];
+  const current = config[state as keyof typeof config] || config[ProcessingState.THINKING];
 
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 glass-matte border border-mirror-border rounded-full w-fit shadow-[0_8px_32px_rgba(0,0,0,0.2)] animate-in fade-in slide-in-from-bottom-2 duration-300">

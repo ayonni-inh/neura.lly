@@ -2,12 +2,13 @@
 import React, { useState } from 'react';
 import { Message, Role, Attachment } from '../types';
 import { MarkdownRenderer } from '../utils/markdown';
+import { SafeImage } from './SafeImage';
 import { 
   User, ExternalLink, Bookmark, 
-  Sparkles, X, Copy, Check, RotateCcw, Download,
+  Bot, Sparkles, X, Copy, Check, RotateCcw, Download,
   FileText, Plus, Lightbulb, AlertTriangle,
   ThumbsUp, ThumbsDown, Volume2, Play, Pause, Repeat, RefreshCw,
-  ChevronLeft, ChevronRight, Share2, Maximize2
+  ChevronLeft, ChevronRight, Video, Table, FileCode, File
 } from 'lucide-react';
 
 interface MessageBubbleProps {
@@ -21,9 +22,9 @@ interface MessageBubbleProps {
   onRegenerate?: (id: string) => void;
   onContinue?: (id: string) => void;
   onSaveImage?: (url: string) => void;
-  onSaveVideo?: (url: string) => void;
   onStop?: () => void;
   onSpeech?: (text: string, id: string) => void;
+  onConnectKey?: () => void;
   autoPlay?: boolean;
 }
 
@@ -37,9 +38,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onRerun,
   onRegenerate,
   onSaveImage,
-  onSaveVideo,
   onStop,
   onSpeech,
+  onConnectKey,
   autoPlay
 }) => {
   const [zoomedImageIndex, setZoomedImageIndex] = useState<number | null>(null);
@@ -47,11 +48,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [copied, setCopied] = useState(false);
   const [isCaptured, setIsCaptured] = useState(false);
   const [savedImageUrls, setSavedImageUrls] = useState<Set<string>>(new Set());
-  const [savedVideoUrl, setSavedVideoUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [sharedImageUrl, setSharedImageUrl] = useState<string | null>(null);
   const audioRef = React.useRef<HTMLAudioElement>(null);
   const isUser = message.role === Role.USER;
 
@@ -134,60 +133,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
   };
 
-  const handleDownloadVideo = (videoUrl: string, timestamp: Date) => {
-    const link = document.createElement('a');
-    link.href = videoUrl;
-    link.download = `neurAlly-video-${timestamp.getTime()}.mp4`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleSaveVideoToGallery = (url: string) => {
-    if (onSaveVideo) {
-      onSaveVideo(url);
-      setSavedVideoUrl(url);
-    }
-  };
-
-  const handleShareImage = async (imageUrl: string) => {
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: 'neurAlly Generated Image',
-          text: 'Check out this AI-generated image from neurAlly',
-          url: imageUrl
-        });
-      } else {
-        // Fallback: copy to clipboard
-        await navigator.clipboard.writeText(imageUrl);
-        setSharedImageUrl(imageUrl);
-        setTimeout(() => setSharedImageUrl(null), 2000);
-      }
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        // Copy to clipboard as fallback
-        try {
-          await navigator.clipboard.writeText(imageUrl);
-          setSharedImageUrl(imageUrl);
-          setTimeout(() => setSharedImageUrl(null), 2000);
-        } catch (e) {
-          console.error('Failed to share or copy image', e);
-        }
-      }
-    }
-  };
-
-  const handleCopyImageUrl = async (imageUrl: string) => {
-    try {
-      await navigator.clipboard.writeText(imageUrl);
-      setSharedImageUrl(imageUrl);
-      setTimeout(() => setSharedImageUrl(null), 2000);
-    } catch (e) {
-      console.error('Failed to copy URL', e);
-    }
-  };
-
   const handleCaptureAction = () => {
     if (footerData.action && onActionClick) {
       onActionClick(footerData.action);
@@ -203,7 +148,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {modelAvatar ? (
             <img src={modelAvatar} alt="AI" className="w-full h-full object-cover" />
           ) : (
-            isError ? <AlertTriangle className="w-4 h-4" /> : <Sparkles className="w-4 h-4 text-mirror-accent" />
+            isError ? <AlertTriangle className="w-4 h-4" /> : <Bot className={`w-4 h-4 text-mirror-accent ${message.isStreaming ? 'animate-pulse scale-110' : ''}`} />
           )}
         </div>
       )}
@@ -218,14 +163,38 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               : 'glass-matte text-mirror-text rounded-2xl md:rounded-[24px] rounded-tl-sm md:rounded-tl-md shadow-[0_8px_32px_rgba(0,0,0,0.2)]'
           } 
           ${message.isBookmarked ? 'ring-2 ring-yellow-500/30' : ''}
-          cursor-pointer`}
+          cursor-pointer relative overflow-hidden`}
         >
+          {/* Intent & Origin Badge */}
+          <div className="absolute top-2 right-3 flex items-center gap-2 opacity-40 group-hover:opacity-100 transition-opacity pointer-events-none">
+            {message.intent && (
+              <span className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-white/10 border border-white/10">
+                {message.intent}
+              </span>
+            )}
+            <span className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-white/5 border border-white/5">
+              {message.origin === 'ai' ? 'Neural Origin' : (message.origin || (isUser ? 'user' : 'ai'))}
+            </span>
+          </div>
+
+          {message.requiresProcessing && !isUser && (
+            <div className="mb-3 flex items-center gap-2 p-2 bg-mirror-accent/10 border border-mirror-accent/20 rounded-xl">
+              <Sparkles className="w-3 h-3 text-mirror-accent animate-pulse" />
+              <span className="text-[10px] font-bold text-mirror-accent uppercase tracking-widest">Awaiting Refinement</span>
+              <button 
+                onClick={(e) => { e.stopPropagation(); onRegenerate?.(message.id); }}
+                className="ml-auto px-3 py-1 bg-mirror-accent text-white rounded-lg text-[9px] font-bold uppercase tracking-widest hover:scale-105 active:scale-95 transition-all"
+              >
+                Process
+              </button>
+            </div>
+          )}
           
           {images.length > 0 && (
             <div className={`mb-4 grid gap-2 ${images.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
               {images.map((imgUrl, idx) => (
                 <div key={idx} className={`relative rounded-2xl overflow-hidden shadow-2xl border border-mirror-border group/img cursor-zoom-in ${images.length === 3 && idx === 0 ? 'col-span-2' : ''}`} onClick={() => setZoomedImageIndex(idx)}>
-                  <img src={imgUrl} alt={`Visual ${idx + 1}`} className="w-full h-auto object-cover transition-transform duration-700 group-hover/img:scale-105" />
+                  <SafeImage src={imgUrl} alt={`Visual ${idx + 1}`} className="w-full h-auto object-cover transition-transform duration-700 group-hover/img:scale-105" />
                   
                   <div className="absolute bottom-2 left-2 p-1.5 bg-black/40 backdrop-blur-md rounded-lg opacity-60 group-hover/img:opacity-100 transition-opacity">
                     <Sparkles className="w-3 h-3 text-mirror-accent" />
@@ -239,9 +208,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         setZoomedImageIndex(idx);
                       }}
                       className="p-3 bg-white/20 hover:bg-white/40 backdrop-blur-md border border-white/30 rounded-full text-white shadow-xl transition-all hover:scale-110 active:scale-95"
-                      title="View Full Screen"
+                      title="Full View"
                     >
-                      <Maximize2 className="w-6 h-6" />
+                      <Plus className="w-6 h-6 rotate-45" />
                     </button>
                     <button 
                       onClick={(e) => {
@@ -249,21 +218,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         handleDownloadImage(imgUrl, message.timestamp);
                       }}
                       className="p-3 bg-mirror-accent/80 hover:bg-mirror-accent backdrop-blur-md border border-white/30 rounded-full text-white shadow-xl transition-all hover:scale-110 active:scale-95"
-                      title="Download to Device"
+                      title="Save to Device"
                     >
                       <Download className="w-6 h-6" />
-                    </button>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleShareImage(imgUrl);
-                      }}
-                      className={`p-3 backdrop-blur-md border border-white/30 rounded-full text-white shadow-xl transition-all hover:scale-110 active:scale-95 ${
-                        sharedImageUrl === imgUrl ? 'bg-blue-500/80' : 'bg-blue-500/60 hover:bg-blue-500/80'
-                      }`}
-                      title="Share or Copy Image"
-                    >
-                      <Share2 className="w-6 h-6" />
                     </button>
                   </div>
 
@@ -285,36 +242,24 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           )}
 
           {message.generatedVideoUrl && (
-            <div className="mb-4 rounded-2xl overflow-hidden shadow-2xl border border-mirror-border group relative">
+            <div className="mb-4 rounded-2xl overflow-hidden shadow-2xl border border-mirror-border">
               <video 
                 src={message.generatedVideoUrl} 
                 controls 
                 className="w-full h-auto"
-                poster={(message.attachments?.[0] || message.attachment)?.mimeType.startsWith('image/') ? `data:${(message.attachments?.[0] || message.attachment)!.mimeType};base64,${(message.attachments?.[0] || message.attachment)!.data}` : undefined}
+                poster={
+                  (message.attachments?.[0] || message.attachment)?.mimeType.startsWith('image/') 
+                    ? `data:${(message.attachments?.[0] || message.attachment)!.mimeType};base64,${(message.attachments?.[0] || message.attachment)!.data}` 
+                    : undefined
+                }
               />
-              <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                <button 
-                  onClick={() => handleSaveVideoToGallery(message.generatedVideoUrl!)}
-                  className={`p-3 backdrop-blur-md border border-white/20 rounded-full text-white shadow-lg transition-all hover:scale-110 active:scale-95 ${savedVideoUrl === message.generatedVideoUrl ? 'bg-green-500/60' : 'bg-black/40 hover:bg-black/60'}`}
-                  title={savedVideoUrl === message.generatedVideoUrl ? "Saved to Gallery" : "Save to Visual Assets"}
-                >
-                  {savedVideoUrl === message.generatedVideoUrl ? <Check className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
-                </button>
-                <button 
-                  onClick={() => handleDownloadVideo(message.generatedVideoUrl!, message.timestamp)}
-                  className="p-3 bg-mirror-accent/80 hover:bg-mirror-accent backdrop-blur-md border border-white/30 rounded-full text-white shadow-xl transition-all hover:scale-110 active:scale-95"
-                  title="Download Video"
-                >
-                  <Download className="w-5 h-5" />
-                </button>
-              </div>
             </div>
           )}
 
           {zoomedImageIndex !== null && images[zoomedImageIndex] && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-2xl p-4 md:p-10 cursor-zoom-out" onClick={() => setZoomedImageIndex(null)}>
                <div className="relative max-w-full max-h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-                 <img src={images[zoomedImageIndex]} className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl" alt="Zoomed" />
+                 <SafeImage src={images[zoomedImageIndex]} className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl" alt="Zoomed" />
                  <X className="absolute -top-12 right-0 md:top-4 md:-right-12 w-8 h-8 text-white/70 hover:text-white cursor-pointer hover:scale-110 transition-transform" onClick={() => setZoomedImageIndex(null)} />
                  
                  {images.length > 1 && (
@@ -340,37 +285,20 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                    </>
                  )}
 
-                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 md:gap-3 flex-wrap justify-center max-w-[90%]">
-                  <button 
-                    onClick={() => handleSaveToGallery(images[zoomedImageIndex])}
-                    className={`flex items-center gap-2 px-4 py-2.5 backdrop-blur-xl border rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${
-                      savedImageUrls.has(images[zoomedImageIndex])
-                        ? 'bg-green-500/40 border-green-400/50 text-white'
-                        : 'bg-black/50 hover:bg-black/80 border-white/10 text-white'
-                    }`}
-                    title="Save to Visual Assets"
-                  >
-                    <Plus className="w-4 h-4" /> {savedImageUrls.has(images[zoomedImageIndex]) ? 'Saved' : 'Save'}
-                  </button>
-                  <button 
+                 <div className="absolute bottom-4 right-4 flex gap-3">
+                   <button 
+                      onClick={() => handleSaveToGallery(images[zoomedImageIndex])}
+                      className="flex items-center gap-2 px-4 py-2 bg-black/50 hover:bg-black/80 backdrop-blur-xl border border-white/10 rounded-xl text-white font-bold text-xs uppercase tracking-widest transition-all"
+                    >
+                       <Plus className="w-4 h-4" /> {savedImageUrls.has(images[zoomedImageIndex]) ? 'Saved' : 'Save'}
+                   </button>
+                   <button 
                     onClick={() => handleDownloadImage(images[zoomedImageIndex], message.timestamp)}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-mirror-accent/80 hover:bg-mirror-accent backdrop-blur-xl border border-white/30 rounded-lg text-white font-bold text-xs uppercase tracking-widest transition-all shadow-lg"
-                    title="Download to Device"
-                  >
-                    <Download className="w-4 h-4" /> Download
-                  </button>
-                  <button 
-                    onClick={() => handleShareImage(images[zoomedImageIndex])}
-                    className={`flex items-center gap-2 px-4 py-2.5 backdrop-blur-xl border rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${
-                      sharedImageUrl === images[zoomedImageIndex]
-                        ? 'bg-blue-500/40 border-blue-400/50 text-white'
-                        : 'bg-black/50 hover:bg-black/80 border-white/10 text-white'
-                    }`}
-                    title="Share or Copy Image URL"
-                  >
-                    <Share2 className="w-4 h-4" /> {sharedImageUrl === images[zoomedImageIndex] ? 'Copied' : 'Share'}
-                  </button>
-                </div>
+                    className="flex items-center gap-2 px-4 py-2 bg-mirror-accent/80 hover:bg-mirror-accent backdrop-blur-xl border border-white/20 rounded-xl text-white font-bold text-xs uppercase tracking-widest transition-all shadow-lg"
+                   >
+                     <Download className="w-4 h-4" /> Download
+                   </button>
+                 </div>
                </div>
             </div>
           )}
@@ -379,17 +307,32 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <div className="mb-4 flex flex-wrap gap-2">
               {message.attachments.map((att, idx) => (
                 <div key={idx} className="rounded-xl overflow-hidden shadow-lg border border-mirror-border max-w-[200px]">
-                  {att.mimeType.startsWith('image/') ? (
-                    <img 
-                      src={`data:${att.mimeType};base64,${att.data}`} 
-                      alt={`Ref ${idx}`} 
+                  {att.type === 'image' ? (
+                    <SafeImage 
+                      src={att.localUrl ? `local://${att.localUrl}` : (att.url || `data:${att.mimeType};base64,${att.data}`)} 
+                      alt={att.name || `Ref ${idx}`} 
                       className="w-full h-auto cursor-zoom-in hover:opacity-80 transition-opacity" 
-                      onClick={(e) => { e.stopPropagation(); setZoomedAttachment(`data:${att.mimeType};base64,${att.data}`); }}
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        setZoomedAttachment(att.localUrl ? `local://${att.localUrl}` : (att.url || `data:${att.mimeType};base64,${att.data}`)); 
+                      }}
                     />
                   ) : (
-                    <div className="flex items-center gap-2 p-2 bg-mirror-text/5 rounded-xl border border-mirror-border text-xs text-mirror-subtext font-mono">
-                      <FileText className="w-4 h-4 text-mirror-accent" />
-                      {att.mimeType.split('/')[1].toUpperCase()}
+                    <div className="flex items-center gap-3 p-3 bg-mirror-text/5 rounded-xl border border-mirror-border text-xs text-mirror-subtext font-mono min-w-[140px]">
+                      <div className="p-2 bg-mirror-accent/10 rounded-lg">
+                        {att.type === 'video' ? <Video className="w-5 h-5 text-mirror-accent" /> :
+                         att.type === 'pdf' ? <FileText className="w-5 h-5 text-red-500" /> :
+                         att.type === 'document' ? <FileText className="w-5 h-5 text-blue-500" /> :
+                         att.type === 'spreadsheet' ? <Table className="w-5 h-5 text-green-500" /> :
+                         att.type === 'text' ? <FileCode className="w-5 h-5 text-mirror-accent" /> :
+                         <File className="w-5 h-5 text-mirror-subtext" />}
+                      </div>
+                      <div className="flex flex-col overflow-hidden">
+                        <span className="font-bold text-[10px] uppercase tracking-widest text-mirror-text truncate">
+                          {att.name || att.mimeType.split('/')[1].toUpperCase()}
+                        </span>
+                        <span className="opacity-50 capitalize">{att.type}</span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -399,19 +342,34 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
           {message.attachment && !message.attachments && (
             <div className="mb-4">
-              {message.attachment.mimeType.startsWith('image/') ? (
+              {message.attachment.type === 'image' ? (
                 <div className="rounded-xl overflow-hidden shadow-lg border border-mirror-border max-w-[200px]">
-                  <img 
-                    src={`data:${message.attachment.mimeType};base64,${message.attachment.data}`} 
-                    alt="Ref" 
+                  <SafeImage 
+                    src={message.attachment.localUrl ? `local://${message.attachment.localUrl}` : (message.attachment.url || `data:${message.attachment.mimeType};base64,${message.attachment.data}`)} 
+                    alt={message.attachment.name || "Ref"} 
                     className="w-full h-auto cursor-zoom-in hover:opacity-80 transition-opacity" 
-                    onClick={(e) => { e.stopPropagation(); setZoomedAttachment(`data:${message.attachment!.mimeType};base64,${message.attachment!.data}`); }}
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      setZoomedAttachment(message.attachment!.localUrl ? `local://${message.attachment!.localUrl}` : (message.attachment!.url || `data:${message.attachment!.mimeType};base64,${message.attachment!.data}`)); 
+                    }}
                   />
                 </div>
               ) : (
-                <div className="flex items-center gap-2 p-2 bg-mirror-text/5 rounded-xl border border-mirror-border text-xs text-mirror-subtext font-mono">
-                  <FileText className="w-4 h-4 text-mirror-accent" />
-                  {message.attachment.mimeType.split('/')[1].toUpperCase()}
+                <div className="flex items-center gap-3 p-3 bg-mirror-text/5 rounded-xl border border-mirror-border text-xs text-mirror-subtext font-mono min-w-[140px] max-w-[200px]">
+                  <div className="p-2 bg-mirror-accent/10 rounded-lg">
+                    {message.attachment.type === 'video' ? <Video className="w-5 h-5 text-mirror-accent" /> :
+                     message.attachment.type === 'pdf' ? <FileText className="w-5 h-5 text-red-500" /> :
+                     message.attachment.type === 'document' ? <FileText className="w-5 h-5 text-blue-500" /> :
+                     message.attachment.type === 'spreadsheet' ? <Table className="w-5 h-5 text-green-500" /> :
+                     message.attachment.type === 'text' ? <FileCode className="w-5 h-5 text-mirror-accent" /> :
+                     <File className="w-5 h-5 text-mirror-subtext" />}
+                  </div>
+                  <div className="flex flex-col overflow-hidden">
+                    <span className="font-bold text-[10px] uppercase tracking-widest text-mirror-text truncate">
+                      {message.attachment.name || message.attachment.mimeType.split('/')[1].toUpperCase()}
+                    </span>
+                    <span className="opacity-50 capitalize">{message.attachment.type}</span>
+                  </div>
                 </div>
               )}
             </div>
@@ -420,7 +378,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {zoomedAttachment && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-2xl p-4 md:p-10 cursor-zoom-out" onClick={() => setZoomedAttachment(null)}>
                <div className="relative max-w-full max-h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-                 <img src={zoomedAttachment} className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl" alt="Zoomed Attachment" />
+                 <SafeImage src={zoomedAttachment} className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl" alt="Zoomed Attachment" />
                  <X className="absolute -top-12 right-0 md:top-4 md:-right-12 w-8 h-8 text-white/70 hover:text-white cursor-pointer hover:scale-110 transition-transform" onClick={() => setZoomedAttachment(null)} />
                </div>
             </div>
@@ -437,6 +395,20 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                </button>
              )}
           </div>
+
+          {message.showKeyCTA && !isUser && (
+            <div className="mt-4 p-4 glass-gloss rounded-2xl border border-yellow-500/30 bg-yellow-500/5">
+              <p className="text-[10px] font-bold text-yellow-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                <Sparkles className="w-3 h-3" /> API Configuration Required
+              </p>
+              <button 
+                onClick={(e) => { e.stopPropagation(); onConnectKey?.(); }}
+                className="w-full py-2.5 bg-yellow-400 hover:bg-yellow-300 text-black rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all shadow-lg shadow-yellow-400/10 flex items-center justify-center gap-2"
+              >
+                Connect Your API Key
+              </button>
+            </div>
+          )}
 
           {message.sources && message.sources.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-mirror-border">

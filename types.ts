@@ -13,10 +13,12 @@ export interface GroundingSource {
 
 export interface Attachment {
   id: string;
+  name: string;
   mimeType: string;
   data: string; // Base64
   url: string; // Data URL or Blob URL for preview
-  type: 'image' | 'video' | 'file';
+  localUrl?: string; // Fallback to IndexedDB key
+  type: 'image' | 'video' | 'file' | 'pdf' | 'document' | 'spreadsheet' | 'text';
 }
 
 export interface ImageGenerationConfig {
@@ -30,15 +32,21 @@ export interface ImageGenerationConfig {
 export interface SavedImage {
   id: string;
   url: string;
+  localUrl?: string; // Fallback to IndexedDB key
   prompt: string;
   timestamp: Date;
 }
+
+export type Intent = 'record' | 'analyze' | 'generate' | 'query' | 'action' | 'unknown';
 
 export interface Message {
   id: string;
   role: Role;
   text: string;
   timestamp: Date;
+  intent?: Intent;
+  origin?: 'user' | 'ai';
+  requiresProcessing?: boolean;
   isStreaming?: boolean;
   sources?: GroundingSource[];
   generatedImageUrl?: string; // Deprecated in favor of generatedImageUrls
@@ -50,6 +58,7 @@ export interface Message {
   isBookmarked?: boolean;
   feedback?: 'positive' | 'negative';
   isError?: boolean;
+  showKeyCTA?: boolean;
 }
 
 export interface Task {
@@ -60,11 +69,32 @@ export interface Task {
   createdAt: Date;
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  sessionIds: string[];
+  taskIds: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface ChatSession {
   id: string;
   title: string;
   messages: Message[];
   updatedAt: Date;
+}
+
+export type AgentType = 'Executor' | 'Strategic' | 'Creative';
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  key: string;
+  service: string;
+  isActive: boolean;
+  createdAt: Date;
 }
 
 export interface UserProfile {
@@ -80,15 +110,35 @@ export interface UserProfile {
     expertise: string;
     interests: string[];
   };
+  plan?: 'free' | 'pro' | 'max';
+  selectedAgent?: AgentType;
+  usage?: {
+    prompts: number;
+    imageGenerations: number;
+    videoGenerations: number;
+    lastReset: Date;
+  };
+  syncIndex?: number;
+  protocolVersion?: string;
+  protocolStage?: number;
+  cognitiveAlignment?: {
+    analytical: number;
+    creative: number;
+    strategic: number;
+    empathic: number;
+  };
+  customDirectives?: string[];
 }
 
 export enum ProcessingState {
   IDLE = 'idle',
+  DETECTING_INTENT = 'detecting_intent',
   THINKING = 'thinking',
   STREAMING = 'streaming',
   IMAGEN = 'generating_image',
   EDITING_IMAGE = 'editing_image',
   GENERATING_VIDEO = 'generating_video',
+  REMOVING_BACKGROUND = 'removing_background',
   ERROR = 'error'
 }
 
@@ -105,51 +155,17 @@ export type VoiceName = 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr';
 export interface VoiceSettings {
   voiceName: VoiceName;
   style: string;
+  pitch: number;
+  speed: number;
   enabled: boolean;
   autoPlay: boolean;
 }
 
-export interface UserBelief {
-  id: string;
-  belief: string;
-  firstMentioned: Date;
-  lastUpdated: Date;
-  frequency: number;
-}
-
-export interface ConversationTheme {
-  id: string;
-  theme: string;
-  messages: string[];
-  intensity: number;
-  firstDetected: Date;
-  lastDetected: Date;
-}
-
-export interface GrowthMetric {
-  id: string;
-  metric: string;
-  baseline: any;
-  current: any;
-  change: number;
-  trackedSince: Date;
-  lastUpdated: Date;
-}
-
-export interface PersonalityProfile {
-  id: string;
-  communicationStyle: 'direct' | 'collaborative' | 'exploratory' | 'technical';
-  emotionalPattern: 'calm' | 'energetic' | 'anxious' | 'focused';
-  decisionStyle: 'analytical' | 'intuitive' | 'pragmatic' | 'balanced';
-  responsePreference: 'detailed' | 'concise' | 'structured' | 'narrative';
-  adaptationScore: number;
-  lastUpdated: Date;
-}
-
-export interface CognitiveState {
-  beliefs: UserBelief[];
-  themes: ConversationTheme[];
-  growthMetrics: GrowthMetric[];
-  personality: PersonalityProfile;
-  recentPatterns: string[];
+export interface StreamResponseResult {
+  text: string;
+  requiresProcessing?: boolean;
+  functionCall?: {
+    name: string;
+    args: any;
+  };
 }
